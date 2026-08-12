@@ -366,3 +366,92 @@ def test_a_crash_mid_scoring_leaves_the_submission_recoverable(tmp_path):
     assert row["status"] == "error"
     assert "github fell over" in row["error"]
     store.close()
+
+
+# ------------------------------------------------------------- public page
+
+
+@pytest.fixture
+def live_page(tmp_path):
+    from talent_engine.server import routes
+
+    cfg = load_program("celo-trial")
+    collector = FakeCollector()
+    service = IntakeService(cfg, str(tmp_path / "t.db"), collector_factory=lambda: collector)
+    httpd = build_server(
+        service, SECRET, host="127.0.0.1", port=0, pages=routes(cfg.name, "wAbCdE")
+    )
+    service.start()
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        yield url, service
+    finally:
+        httpd.shutdown()
+        service.stop()
+        thread.join(timeout=5)
+
+
+def get(url):
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            return resp.status, resp.read().decode(), dict(resp.headers)
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode(), dict(exc.headers)
+
+
+def test_landing_page_renders_with_the_form_embedded(live_page):
+    url, _ = live_page
+    status, body, headers = get(url + "/")
+    assert status == 200
+    assert "https://tally.so/embed/wAbCdE" in body
+    assert "reproduce your own score" in body
+    assert headers["Content-Type"].startswith("text/html")
+
+
+def test_page_carries_a_restrictive_csp(live_page):
+    """The page loads no scripts of its own and one foreign origin."""
+    url, _ = live_page
+    _status, _body, headers = get(url + "/")
+    csp = headers["Content-Security-Policy"]
+    assert "default-src 'none'" in csp
+    assert "frame-src https://tally.so" in csp
+    assert headers["X-Content-Type-Options"] == "nosniff"
+
+
+def test_no_path_traversal_is_reachable(live_page):
+    """Routing is an exact-match dict lookup, so these are all plain misses."""
+    url, _ = live_page
+    for probe in (
+        "/../../etc/passwd",
+        "/..%2f..%2fetc%2fpasswd",
+        "/static/../../../etc/passwd",
+        "/talent_engine.db",
+        "/.env",
+        "/intake.env",
+    ):
+        status, _body, _headers = get(url + probe)
+        assert status == 404, f"{probe} returned {status}"
+
+
+def test_page_is_absent_when_not_configured(live):
+    """`serve --no-page` leaves only the webhook and health endpoints."""
+    url, _service, _collector = live
+    assert get(url + "/")[0] == 404
+    assert get(url + "/healthz")[0] == 200
+
+
+def test_the_form_embed_degrades_honestly_without_a_form_id():
+    from talent_engine.server import landing_page
+
+    body = landing_page("Some Program", "").decode()
+    assert "tally.so/embed" not in body
+    assert "not connected yet" in body
+
+
+def test_form_id_is_escaped_into_the_iframe_src():
+    from talent_engine.server import landing_page
+
+    body = landing_page("P", '"><script>alert(1)</script>').decode()
+    assert "<script>alert(1)</script>" not in body

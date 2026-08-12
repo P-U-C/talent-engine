@@ -201,7 +201,7 @@ class IntakeService:
         return self._run_ids[day]
 
 
-def build_handler(service: IntakeService, secret: str):
+def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[str, bytes]]):
     class Handler(BaseHTTPRequestHandler):
         server_version = "talent-engine"
         sys_version = ""
@@ -209,20 +209,41 @@ def build_handler(service: IntakeService, secret: str):
         def log_message(self, fmt: str, *args: Any) -> None:  # route through logging
             log.info("%s %s", self.address_string(), fmt % args)
 
-        def _plain(self, code: int, body: str = "") -> None:
-            payload = body.encode()
+        def _send(self, code: int, content_type: str, payload: bytes) -> None:
             self.send_response(code)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(payload)))
+            # The page embeds Tally in an iframe and loads nothing else, so the
+            # policy can be this tight: no scripts of our own, no other origins.
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'none'; style-src 'unsafe-inline'; "
+                "frame-src https://tally.so; form-action 'none'; base-uri 'none'",
+            )
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
             self.end_headers()
-            if payload:
+            if payload and self.command != "HEAD":
                 self.wfile.write(payload)
 
+        def _plain(self, code: int, body: str = "") -> None:
+            self._send(code, "text/plain; charset=utf-8", body.encode())
+
         def do_GET(self) -> None:  # noqa: N802
-            if self.path.rstrip("/") in ("/healthz", "/health"):
+            # Exact-match lookup only. No path is ever joined to a filesystem
+            # root here, so traversal is not a thing that can be attempted.
+            path = self.path.split("?", 1)[0]
+            if path.rstrip("/") in ("/healthz", "/health"):
                 self._plain(200, "ok\n")
+                return
+            page = pages.get(path) or (pages.get(path.rstrip("/")) if path != "/" else None)
+            if page:
+                self._send(200, page[0], page[1])
             else:
                 self._plain(404)
+
+        def do_HEAD(self) -> None:  # noqa: N802
+            self.do_GET()
 
         def do_POST(self) -> None:  # noqa: N802
             if self.path.rstrip("/") not in ("/webhook/tally", "/webhook"):
@@ -267,7 +288,11 @@ def build_handler(service: IntakeService, secret: str):
 
 
 def build_server(
-    service: IntakeService, secret: str, host: str = "127.0.0.1", port: int = 8787
+    service: IntakeService,
+    secret: str,
+    host: str = "127.0.0.1",
+    port: int = 8787,
+    pages: dict[str, tuple[str, bytes]] | None = None,
 ) -> ThreadingHTTPServer:
     if not secret:
         raise ValueError(
@@ -275,11 +300,19 @@ def build_server(
             "endpoint is an open GitHub-API spend and lets anyone inject "
             "applicants into the ranking"
         )
-    return ThreadingHTTPServer((host, port), build_handler(service, secret))
+    return ThreadingHTTPServer(
+        (host, port), build_handler(service, secret, pages or {})
+    )
 
 
-def run_server(service: IntakeService, secret: str, host: str, port: int) -> None:
-    httpd = build_server(service, secret, host, port)
+def run_server(
+    service: IntakeService,
+    secret: str,
+    host: str,
+    port: int,
+    pages: dict[str, tuple[str, bytes]] | None = None,
+) -> None:
+    httpd = build_server(service, secret, host, port, pages)
     service.start()
     requeued = service.requeue_pending()
     if requeued:

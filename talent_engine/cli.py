@@ -232,7 +232,7 @@ def cmd_runs(args) -> int:
 def cmd_serve(args) -> int:
     import logging
 
-    from .server import IntakeService, run_server
+    from .server import IntakeService, routes, run_server
 
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s: %(message)s"
@@ -256,7 +256,14 @@ def cmd_serve(args) -> int:
         db_path=args.db,
         collector_factory=lambda: Collector(_client(args), window_days=cfg.window_days),
     )
-    run_server(service, secret, args.host, args.port)
+    pages = {} if args.no_page else routes(cfg.name, os.environ.get("TALLY_FORM_ID", ""))
+    if pages and not os.environ.get("TALLY_FORM_ID"):
+        print(
+            "note: TALLY_FORM_ID is not set, so the landing page renders without "
+            "the embedded form.",
+            file=sys.stderr,
+        )
+    run_server(service, secret, args.host, args.port, pages)
     return 0
 
 
@@ -339,6 +346,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--program", required=True)
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8787)
+    s.add_argument(
+        "--no-page",
+        action="store_true",
+        help="serve only the webhook endpoint, no public landing page",
+    )
     s.set_defaults(func=cmd_serve)
 
     s = sub.add_parser("submissions", help="what has come in through the form")
