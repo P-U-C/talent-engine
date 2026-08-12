@@ -378,6 +378,7 @@ def cmd_runs(args) -> int:
 def cmd_serve(args) -> int:
     import logging
 
+    from .programs.policy import load_overlay
     from .server import IntakeService, routes, run_server
 
     logging.basicConfig(
@@ -397,6 +398,36 @@ def cmd_serve(args) -> int:
         return 2
 
     cfg = load_program(args.program)
+
+    # Load and validate the programme policy before accepting a single
+    # application. Previously the overlay was only read when someone was
+    # accepted, which meant the service would happily take applications for
+    # months under terms that violate the invariants and only fail at the
+    # moment of accepting a person. Refusing to start is the enforcement.
+    overlay = None
+    try:
+        overlay = load_overlay(args.overlay or args.program)
+    except FileNotFoundError:
+        print(
+            f"note: no policy overlay for {cfg.key}; serving the form without "
+            "programme terms. Add one in policies/ to state and enforce them.",
+            file=sys.stderr,
+        )
+    except ValueError as exc:
+        print(f"refusing to serve: the programme policy is invalid — {exc}", file=sys.stderr)
+        return 2
+
+    if overlay:
+        logging.getLogger("talent_engine.intake").info(
+            "serving under %s:\n  %s", overlay.name, "\n  ".join(overlay.terms_summary())
+        )
+        if not overlay.is_open:
+            print(
+                f"note: {overlay.key} is marked closed; the page will say so and "
+                "will not show the form.",
+                file=sys.stderr,
+            )
+
     service = IntakeService(
         cfg=cfg,
         db_path=args.db,
@@ -405,7 +436,7 @@ def cmd_serve(args) -> int:
     pages = (
         {}
         if args.no_page
-        else routes(cfg.name, os.environ.get("TALLY_FORM_ID", ""), cfg.page)
+        else routes(cfg.name, os.environ.get("TALLY_FORM_ID", ""), cfg.page, overlay)
     )
     if pages and not os.environ.get("TALLY_FORM_ID"):
         print(
@@ -534,6 +565,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--program", required=True)
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8787)
+    s.add_argument("--overlay", help="policy key, if it differs from --program")
     s.add_argument(
         "--no-page",
         action="store_true",

@@ -246,7 +246,53 @@ DEFAULT_COPY = {
 }
 
 
-def landing_page(program_name: str, form_id: str, copy: dict[str, str] | None = None) -> bytes:
+def _terms_block(overlay) -> str:
+    """The terms, rendered from the policy the service validated at startup.
+
+    Written once, in the policy, and displayed from there — so the page cannot
+    say something the code does not enforce.
+    """
+    if overlay is None:
+        return ""
+    items = "".join(f"<li>{html.escape(line)}</li>" for line in overlay.terms_summary())
+    return (
+        '<h2>The terms</h2>\n<div class="card"><ul class="signals">'
+        f"{items}</ul>"
+        "<p>These are enforced by the code that runs this programme: a policy "
+        "that takes equity, leaves the give-back uncapped, lets it run forever, "
+        "or fails to state what we owe you will not load, and the service will "
+        "not start.</p></div>"
+    )
+
+
+def _status_block(overlay, form_id: str) -> str:
+    """Say plainly whether applications are open, and show the form only if so.
+
+    A page that renders an application form is a page that says "apply". If the
+    programme is not taking applications, it must not look like it is.
+    """
+    if overlay is not None and not overlay.is_open:
+        return (
+            '<div class="card accent"><h3>Applications are closed</h3>'
+            "<p>This round is not accepting applications. The rubric and the "
+            "code remain public, and you can still reproduce your own score.</p>"
+            "</div>"
+        )
+    closing = ""
+    if overlay is not None and overlay.applications_close:
+        closing = (
+            f'<p class="note">Applications close '
+            f"{html.escape(overlay.applications_close)}.</p>"
+        )
+    return closing + _embed(form_id)
+
+
+def landing_page(
+    program_name: str,
+    form_id: str,
+    copy: dict[str, str] | None = None,
+    overlay=None,
+) -> bytes:
     """Render the application page.
 
     `copy` comes from the program config so the running organisation owns the
@@ -332,8 +378,10 @@ your circumstances enters because you chose to tell us. Your contact details
 are stored separately from everything used for assessment, and never appear in
 an assessment record.</p>
 
+{_terms_block(overlay)}
+
 <h2>Apply</h2>
-{_embed(form_id)}
+{_status_block(overlay, form_id)}
 
 </div>
 
@@ -355,10 +403,11 @@ def routes(
     program_name: str,
     form_id: str | None = None,
     copy: dict[str, str] | None = None,
+    overlay=None,
 ) -> dict[str, tuple[str, bytes]]:
     """Exact path -> (content type, body). Anything not in here is a 404."""
     form_id = form_id if form_id is not None else os.environ.get("TALLY_FORM_ID", "")
-    page = landing_page(program_name, form_id, copy)
+    page = landing_page(program_name, form_id, copy, overlay)
     return {
         "/": ("text/html; charset=utf-8", page),
         "/apply": ("text/html; charset=utf-8", page),

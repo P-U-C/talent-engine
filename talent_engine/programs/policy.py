@@ -40,6 +40,10 @@ class ProgramOverlay:
     monitoring: dict[str, Any]
     giveback: dict[str, Any]
     kpis: dict[str, Any] = field(default_factory=dict)
+    # Whether the programme is accepting applications. The public page
+    # reads this, so the page cannot look open while the programme is not.
+    status: str = "open"
+    applications_close: str = ""
     upside: dict[str, Any] = field(default_factory=dict)
     # What the program owes the recipient. A sponsorship where only one
     # side carries obligations is not a relationship, and at this cheque
@@ -104,6 +108,9 @@ class ProgramOverlay:
                 "offer is the instrument at this size."
             )
 
+        if self.status not in ("open", "closed"):
+            raise ValueError(f"{self.key}: status must be open or closed")
+
         if not self.commitments_to_recipient:
             raise ValueError(
                 f"{self.key}: state what the program owes the recipient. Terms that "
@@ -127,6 +134,34 @@ class ProgramOverlay:
     @property
     def total_budget_usd(self) -> float:
         return round(self.per_person_usd * self.seats, 2)
+
+    @property
+    def is_open(self) -> bool:
+        return self.status == "open"
+
+    def terms_summary(self) -> list[str]:
+        """The terms in one place, for logs and for the public page.
+
+        Rendered from the policy rather than written twice, so the page cannot
+        drift from what is actually enforced.
+        """
+        g = self.giveback
+        lines = [
+            f"{self.seats} places, {self.duration_months} months, "
+            f"${self.per_person_usd:,.0f} each (${self.total_budget_usd:,.0f} total)",
+            f"give-back {g.get('total_bps', 0) / 100:.0f}% of Celo revenue and "
+            f"grant income, capped at ${self.giveback_cap_usd:,.0f}, expiring "
+            f"{g.get('sunset_months_after_term')} months after the term, "
+            "pro-rated by months received",
+            f"equity taken: {'yes' if self.upside.get('equity_taken') else 'none'}"
+            + (
+                "; right of first offer on a future round"
+                if self.upside.get("right_of_first_offer_next_round")
+                else ""
+            ),
+            "enforcement: " + str(g.get("enforcement", "unspecified")),
+        ]
+        return lines
 
     @property
     def giveback_cap_usd(self) -> float:

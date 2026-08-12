@@ -95,17 +95,39 @@ class Scout:
     def _since(self) -> str:
         return (self.now - timedelta(days=self.window_days)).date().isoformat()
 
-    def _add(self, login: str, channel: str, reason: str, url: str, user_type: str = "") -> None:
+    def _add(
+        self, login: str, channel: str, reason: str, url: str, user_type: str = ""
+    ) -> bool:
+        """Record a candidate. Returns whether one was actually accepted.
+
+        Callers use the return value for their quotas: counting rows instead
+        meant a busy repository could spend its whole allocation on Dependabot
+        and CI accounts and surface nobody.
+        """
         if not login or _is_bot(login, user_type):
-            return
+            return False
         cand = self.candidates.setdefault(login, Candidate(handle=login))
         cand.merge(channel, reason, url)
+        return True
 
     # ------------------------------------------------------------- channels
 
-    def from_contributors(self, seed_repos: Iterable[str], *, per_repo: int = 30) -> None:
-        """Recent merged-PR authors in seed repositories."""
+    def from_contributors(
+        self,
+        seed_repos: Iterable[str],
+        *,
+        per_repo: int = 30,
+        caps: dict[str, int] | None = None,
+    ) -> None:
+        """Recent merged-PR authors in seed repositories.
+
+        `caps` sets a per-repository allocation. A uniform quota lets one noisy
+        high-traffic repository dominate the digest while a small, dense,
+        high-signal one contributes almost nothing.
+        """
+        caps = caps or {}
         for repo in seed_repos:
+            limit = caps.get(repo, per_repo)
             query = f"repo:{repo} is:pr is:merged merged:>={self._since}"
             try:
                 found = 0
@@ -116,15 +138,15 @@ class Scout:
                     login = user.get("login", "")
                     if login.lower() == repo.split("/")[0].lower():
                         continue
-                    self._add(
+                    if self._add(
                         login,
                         "contributors",
                         f"merged PR into {repo}",
                         raw.get("html_url", ""),
                         user.get("type", ""),
-                    )
-                    found += 1
-                    if found >= per_repo:
+                    ):
+                        found += 1
+                    if found >= limit:
                         break
             except BudgetExhausted:
                 self.notes.append("budget exhausted during contributor scan")
