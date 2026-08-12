@@ -159,3 +159,83 @@ Compliance notes for employment use: public data only; the candidate can read
 the rubric and their own dossier; and jurisdiction review is required before
 using any automated score in an employment decision. The engine produces an
 evidence-linked shortlist for a human, not a decision.
+
+## What an adversary who has read this document can score
+
+The rubric is published on purpose, so the realistic attacker has read it. The
+attack in `tests/fixtures/profiles.py::gamed_profile` — fresh account, bulk
+commits, a wall of forks — is what someone builds who has *not*, and it scores
+4.68 out of 100 with four flags raised. That number has been used as evidence
+the screen resists gaming. It is not evidence of that; it only shows the
+cheapest attack fails.
+
+Two profiles model the attacker who read the document. Measured on
+`recruit-agent-infra`:
+
+| profile | score | flags |
+|---|---|---|
+| sockpuppet_ring | **56.79** | none |
+| genuine_builder | 49.93 | unverifiable_referrer |
+| patient_farmer | 41.36 | none |
+| quiet_finisher | 29.43 | none |
+| insider_low_shipper | 23.94 | none |
+| gamed_profile | 4.68 | 4 |
+
+The manufactured profile wins, and the only credible profile carrying a warning
+is the honest one.
+
+### Why the flags miss it
+
+Every authenticity check in `flags.py` keys on **concentration** — account age,
+activity collapsed into a few weeks, implausible commits per active week. All
+of them are defeated by the same move: commit a little, weekly, for a few
+months, from an account aged in advance. `patient_farmer` is a cron entry plus
+an afternoon spent adding descriptions, licences, homepages and tagged releases
+to three thin repositories. Metadata is the part of "finishing" that can be
+produced without finishing anything, and this document argues finishing is the
+strongest signal, which tells the attacker exactly where to spend the afternoon.
+
+`sockpuppet_ring` adds the second half. `external_validation` and
+`collaboration` gate on `is_own_repo`, which means "not owned by this account".
+A second account costs nothing, so PRs merged between two accounts one person
+controls are scored as an independent maintainer clearing their review bar.
+Nothing in a `ProfileSnapshot` distinguishes an alt's repository from a real
+one: not contributor count, not age before the PR landed, not whether anyone
+unrelated ever touched it.
+
+### The flag asymmetry
+
+`genuine_builder` is flagged for naming a referrer the program's registry does
+not contain. Both manufactured profiles name no referrer and pass clean.
+Declaring something checkable is what earns a warning; declaring nothing is
+free. An unverifiable referrer should score zero — it already does — without
+also being the loudest thing on the dossier.
+
+### What would actually close it
+
+None of these are scoring-curve tweaks; two are collection changes:
+
+1. **Independence of the validating repository.** Count a merged PR as external
+   validation only when the receiving repository shows independence — other
+   contributors, meaningful age before the PR, or contributors with no other
+   overlap with the applicant. Requires collecting contributor lists.
+2. **Overlap detection across applicants.** A ring is visible in aggregate even
+   when each member looks clean alone: shared repositories, mutual PRs,
+   accounts created together. This is a batch check across the applicant pool,
+   not a per-profile one, and it is the single highest-value addition.
+3. **Substance behind finishing metadata.** A release with no assets, a
+   homepage that does not resolve, a licence added in the same commit as the
+   description — all cheap to check, all currently unchecked.
+
+### Where this leaves the design
+
+The exposure is a function of stakes, not of code quality. For an invited
+cohort of five, none of it matters: everyone is known, and the rubric ranks
+people the operator could already vouch for. For an open form that anyone can
+submit to, with sponsorship at the end and the rubric published, the incentive
+to run exactly these attacks is created on the day the form goes live.
+
+The honest statement of the current position: this engine measures public
+evidence of shipping well, and resists lazy manipulation. It does not yet
+resist a patient adversary, and it should not be the sole input to a funding
+decision until items 1 and 2 exist.

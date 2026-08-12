@@ -311,3 +311,142 @@ def insider_low_shipper() -> ProfileSnapshot:
         active_weeks=_weeks_spread(10, start_week=8, step=2),
         application=Application(referrer_name="", declared_repo=""),
     )
+
+
+# ---------------------------------------------------------------------------
+# Red team.
+#
+# `gamed_profile` above is the attack of someone who has NOT read the rubric.
+# The rubric is published on purpose, so the realistic adversary has read it
+# and knows exactly which checks exist. These two profiles are what that person
+# builds. They are here to be measured, not to pass.
+# ---------------------------------------------------------------------------
+
+
+def patient_farmer() -> ProfileSnapshot:
+    """Low-and-slow manufacturing: the attack the burst check cannot see.
+
+    Every anti-gaming check in `flags.py` keys on *concentration* — a fresh
+    account, activity collapsed into a few weeks, implausible commits per week.
+    All of them are defeated by the same cheap move: a scheduled job that makes
+    a few real commits a week for a few months, from an account aged in
+    advance.
+
+    Cost to produce: one cron entry, plus an afternoon adding descriptions,
+    licences, homepages and tagged releases to three thin repositories —
+    because the rubric says finishing metadata is the strongest signal, and
+    metadata is the one part of finishing that can be added without doing the
+    work.
+    """
+    repos = [
+        RepoActivity(
+            name=f"steady-sam/{name}",
+            owner="steady-sam",
+            is_fork=False,
+            pushed_at=_iso(2026, 7, 25),
+            created_at=_iso(2026, 2, 10),
+            description=desc,
+            language=lang,
+            topics=topics,
+            has_releases=True,
+            has_description=True,
+            homepage=f"https://{name}.example",
+            license="MIT",
+            commits_in_window=commits,
+        )
+        for name, desc, lang, topics, commits in [
+            (
+                "celo-payments-kit",
+                "Payment helpers for Celo stablecoin apps.",
+                "TypeScript",
+                ["celo", "minipay", "web3"],
+                48,
+            ),
+            (
+                "agent-tool-runtime",
+                "A small runtime for agent tool calling.",
+                "Rust",
+                ["mcp", "ai-agents", "rust"],
+                41,
+            ),
+            (
+                "evm-index-lite",
+                "Lightweight EVM log indexer.",
+                "Go",
+                ["ethereum", "infrastructure"],
+                35,
+            ),
+        ]
+    ]
+    return ProfileSnapshot(
+        handle="steady-sam",
+        account_created_at=_iso(2024, 6, 1),  # aged past new_account_days
+        collected_at=WINDOW_END,
+        window_start=WINDOW_START,
+        window_end=WINDOW_END,
+        repos=repos,
+        merged_prs=[],
+        reviews=[],
+        # 20 weeks, ~6 commits each: under the inflation threshold, spread
+        # across all three thirds of the window.
+        active_weeks=_weeks_spread(20, start_week=6),
+        application=Application(
+            context_statement=(
+                "Self-taught, working from a region with no local funding for "
+                "open source. Everything here was built in evenings."
+            ),
+            context_factors=["self-taught", "no institutional funding"],
+            referrer_name="",
+            declared_repo="steady-sam/celo-payments-kit",
+        ),
+    )
+
+
+def sockpuppet_ring() -> ProfileSnapshot:
+    """The same patient profile, plus merged PRs into repos the attacker owns.
+
+    `external_validation` and `collaboration` are gated on `is_own_repo`, which
+    means "not owned by this account". A second account is free, so PRs merged
+    between two accounts the same person controls read as an independent
+    reviewer clearing them — which is precisely the thing those dimensions
+    claim to measure.
+
+    Nothing in a snapshot currently distinguishes an independent repository
+    from an alt's: not age, not contributor count, not whether anyone unrelated
+    ever touched it.
+    """
+    base = patient_farmer()
+    ring = ["sam-alt-one", "sam-labs-io", "samtools-dev", "sam-oss-collective"]
+    merged = [
+        PullRequestActivity(
+            repo=f"{owner}/{repo}",
+            number=10 + i,
+            title=title,
+            merged_at=_iso(2026, 3 + i, 12),
+            created_at=_iso(2026, 3 + i, 5),
+        )
+        for i, (owner, repo, title) in enumerate(
+            [
+                (ring[0], "sdk", "Add retry helper"),
+                (ring[1], "protocol-utils", "Support batch calls"),
+                (ring[2], "cli", "Fix config precedence"),
+                (ring[3], "runtime", "Add tool schema validation"),
+            ]
+        )
+    ]
+    reviews = [
+        ReviewActivity(repo=f"{ring[i % 4]}/misc", number=50 + i, submitted_at=_iso(2026, 5, 6))
+        for i in range(6)
+    ]
+    return ProfileSnapshot(
+        handle="steady-sam",
+        account_created_at=base.account_created_at,
+        collected_at=WINDOW_END,
+        window_start=WINDOW_START,
+        window_end=WINDOW_END,
+        repos=base.repos,
+        merged_prs=merged,
+        reviews=reviews,
+        active_weeks=base.active_weeks,
+        application=base.application,
+    )
