@@ -33,6 +33,7 @@ from ..config import ProgramConfig
 from ..github.collector import Collector
 from ..ingest.tally import Submission, TallyPayloadError, parse_webhook, verify_signature
 from ..model import Application, utc_now_iso
+from ..notify import application_scored
 from ..scoring.concerns import concerns
 from ..scoring.engine import CODE_VERSION, score_snapshot
 from ..store.db import Store
@@ -188,6 +189,17 @@ class IntakeService:
             submission_id, "scored", run_id=run_id, total=score.total, concerns=caveat
         )
         log.info("scored %s: %.2f (run %s) — %s", row["handle"], score.total, run_id, caveat)
+
+        # Push, because nobody watches a table. Contact details deliberately
+        # stay on this box — see notify.py.
+        application_scored(
+            handle=row["handle"],
+            total=score.total,
+            caveat=caveat,
+            program=self.cfg.key,
+            declared_repo=app.declared_repo,
+            max_points=sum(self.cfg.weights.values()),
+        )
 
     def _run_for_today(self) -> str:
         """One run per UTC day, so a rolling intake still groups into cohorts.
