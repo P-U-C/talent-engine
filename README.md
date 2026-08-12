@@ -11,6 +11,10 @@ same rubric so sourcing, selection, and outcome measurement cannot drift apart.
   candidate can reproduce their own score.
 - **[docs/STRATEGY.md](docs/STRATEGY.md)** — why these signals, what they resist,
   and what they miss.
+- **[docs/PROGRAM_LAYER.md](docs/PROGRAM_LAYER.md)** — how governed programs sit
+  above the score without turning an automated rank into a funding decision.
+- **[docs/PREZENTI_SPONSORSHIP_TRIAL.md](docs/PREZENTI_SPONSORSHIP_TRIAL.md)** —
+  the first live overlay: attract outside builders and prove useful Celo work.
 
 ## Install
 
@@ -19,7 +23,7 @@ must be able to clone this and reproduce their number with no install step.
 
 ```
 git clone https://github.com/P-U-C/talent-engine && cd talent-engine
-python3 -m pytest tests/ -q          # 50 tests
+python3 -m pytest tests/ -q
 ```
 
 `cryptography` is needed only for GitHub App authentication. PyYAML is optional
@@ -79,6 +83,24 @@ see once it has happened:
 Contact details are stored in their own table and never enter a snapshot, a
 score, or a dossier — see invariant 7.
 
+### Program overlays
+
+Scoring and sponsorship are deliberately separate. `programs/` answers "what
+public evidence says this person ships?"; `policies/` owns eligibility, fit,
+human verification, budget, checkpoints, termination and outcomes.
+
+```python
+from talent_engine.programs import load_overlay
+
+trial = load_overlay("prezenti-sponsorship-trial")
+assert trial.per_person_usd == 1400
+assert trial.total_budget_usd == 7000
+```
+
+The overlay validator refuses automated final selection, termination from a
+metric flag alone, an inactivity rule without a cure period, or a benefit
+schedule that does not match the declared budget.
+
 ## Design invariants
 
 These are enforced in code, not asserted in documentation:
@@ -119,6 +141,8 @@ talent_engine/
   modes/
     scout.py         three discovery channels
     monitor.py       cohort status + before/after measurement
+  programs/
+    policy.py        validated selection, budget, checkpoint + give-back layer
   store/db.py        persistence + audit log + replay
   ingest/normalize.py CSV ingest, handle normalisation
   ingest/tally.py    form webhooks -> Application + quarantined Contact
@@ -135,8 +159,9 @@ and what `verify` checks.
 ## Status
 
 Working: rubric, flags, config validation, GitHub client (auth/cache/budget),
-collector, scout, monitor, measure, persistence, audit log + replay, CSV
-ingest, dossiers, CLI. 50 tests, no network required.
+collector, scout, monitor, measure, persistence, audit log + replay, CSV and
+signed-webhook ingest, dossiers, CLI, adversarial fixtures, and validated
+program overlays.
 
-Not yet built: HTTP API and UI, webhook ingestion, the optional LLM pass for
-free-text, and a real-world calibration run against known-good profiles.
+Not yet built: UI, the optional LLM pass for free-text, applicant-relationship
+graph checks, and a real-world calibration run against known-good profiles.

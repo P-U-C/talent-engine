@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import http.client
 import json
 import threading
 import urllib.error
@@ -337,8 +338,19 @@ def test_garbage_bodies_are_rejected_by_shape(live):
 
 def test_oversized_body_is_refused(live):
     url, _service, _collector = live
-    huge = b"x" * (1 << 21)
-    assert post(url, huge, sign(huge))[0] == 413
+    # Send only the headers. The server rejects from Content-Length before it
+    # reads the body; asking urllib to upload 2 MiB lets a fast rejection close
+    # the socket mid-send and Python 3.12 reports BrokenPipe instead of exposing
+    # the 413 response.
+    host = url.removeprefix("http://")
+    conn = http.client.HTTPConnection(host, timeout=5)
+    conn.putrequest("POST", "/webhook/tally")
+    conn.putheader("Content-Length", str(1 << 21))
+    conn.endheaders()
+    response = conn.getresponse()
+    assert response.status == 413
+    response.read()
+    conn.close()
 
 
 def test_health_endpoint(live):
