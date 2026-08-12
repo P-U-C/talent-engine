@@ -99,6 +99,21 @@ CREATE TABLE IF NOT EXISTS submissions (
 CREATE INDEX IF NOT EXISTS idx_submissions_status ON submissions(status);
 CREATE INDEX IF NOT EXISTS idx_submissions_handle ON submissions(handle);
 
+-- Decisions, and the feedback owed because of them. The policy commits the
+-- programme to giving feedback to unsuccessful applicants; an obligation with
+-- no queue gets honoured for the first three people and dropped at scale, so
+-- it is tracked rather than remembered.
+CREATE TABLE IF NOT EXISTS decisions (
+    program TEXT NOT NULL,
+    handle TEXT NOT NULL,
+    decision TEXT NOT NULL,          -- accepted | declined
+    decided_at TEXT NOT NULL,
+    note TEXT DEFAULT '',
+    feedback_sent_at TEXT DEFAULT '',
+    PRIMARY KEY (program, handle)
+);
+CREATE INDEX IF NOT EXISTS idx_decisions_feedback ON decisions(feedback_sent_at);
+
 -- Contact details live here and ONLY here: never in a snapshot, never in a
 -- score, never in a dossier. Joined to a submission by id when a human needs
 -- to reach someone, and separable from everything publishable by dropping
@@ -459,6 +474,43 @@ class Store:
             if snap is not None:
                 out[handle] = snap
         return out
+
+    # ------------------------------------------------------------- decisions
+
+    def record_decision(
+        self, program: str, handle: str, decision: str, note: str = ""
+    ) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO decisions (program, handle, decision, decided_at, "
+            "note, feedback_sent_at) VALUES (?, ?, ?, ?, ?, "
+            "COALESCE((SELECT feedback_sent_at FROM decisions WHERE program = ? "
+            "AND handle = ?), ''))",
+            (program, handle, decision, utc_now_iso(), note, program, handle),
+        )
+        self.conn.commit()
+
+    def mark_feedback_sent(self, program: str, handle: str) -> None:
+        self.conn.execute(
+            "UPDATE decisions SET feedback_sent_at = ? WHERE program = ? AND handle = ?",
+            (utc_now_iso(), program, handle),
+        )
+        self.conn.commit()
+
+    def pending_feedback(self, program: str) -> list[dict[str, Any]]:
+        """Declined applicants who have not yet been told anything."""
+        rows = self.conn.execute(
+            "SELECT * FROM decisions WHERE program = ? AND decision = 'declined' "
+            "AND feedback_sent_at = '' ORDER BY decided_at",
+            (program,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def decisions(self, program: str) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT * FROM decisions WHERE program = ? ORDER BY decided_at DESC",
+            (program,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def contact_for(self, submission_id: str) -> dict[str, Any] | None:
         row = self.conn.execute(

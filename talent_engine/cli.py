@@ -219,6 +219,61 @@ def cmd_dossier(args) -> int:
     return 0
 
 
+def cmd_decline(args) -> int:
+    """Record a decline and produce the feedback the policy promises."""
+    from .modes.decisions import feedback_letter
+
+    cfg = load_program(args.program)
+    store = Store(args.db)
+    handle = normalize_handle(args.handle) or args.handle
+
+    row = None
+    for r in store.submissions(cfg.key, limit=1000):
+        if r["handle"] == handle and r["status"] == "scored":
+            row = r
+            break
+    if not row:
+        print(
+            f"no scored submission for {handle} in {cfg.key} — decline what was "
+            "actually assessed, not a name",
+            file=sys.stderr,
+        )
+        store.close()
+        return 2
+
+    store.record_decision(cfg.key, handle, "declined", note=args.note or "")
+    score = store.replay(row["run_id"], handle)
+    print(
+        feedback_letter(
+            handle, score, cfg, caveat=row["concerns"] or "",
+            seats=args.seats, applicants=args.applicants, note=args.note or "",
+        )
+    )
+    if args.mark_sent:
+        store.mark_feedback_sent(cfg.key, handle)
+        print("\n(marked as sent)", file=sys.stderr)
+    else:
+        print(
+            "\n(not marked sent — pass --mark-sent once it has actually gone out)",
+            file=sys.stderr,
+        )
+    store.close()
+    return 0
+
+
+def cmd_feedback_queue(args) -> int:
+    """Who is still owed the feedback the policy promised them."""
+    cfg = load_program(args.program)
+    store = Store(args.db)
+    pending = store.pending_feedback(cfg.key)
+    if not pending:
+        print("nobody is waiting on feedback")
+    for row in pending:
+        print(f"{row['decided_at']}  {row['handle']}  declined  (no feedback sent)")
+    store.close()
+    return 1 if pending else 0
+
+
 def cmd_accept(args) -> int:
     """Record an acceptance and produce the letter. Deploys nothing."""
     from .modes.acceptance import acceptance_letter, split_plan
@@ -240,6 +295,7 @@ def cmd_accept(args) -> int:
             return 2
         store.select_cohort(cfg.key, [handle], baseline_run_id=args.baseline or "")
 
+    store.record_decision(cfg.key, handle, "accepted")
     ok = store.record_acceptance(
         cfg.key,
         handle,
@@ -437,6 +493,21 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("runs")
     s.add_argument("--program")
     s.set_defaults(func=cmd_runs)
+
+    s = sub.add_parser("decline", help="record a decline and print the feedback owed")
+    s.add_argument("--program", required=True)
+    s.add_argument("--handle", required=True)
+    s.add_argument("--seats", type=int, help="places available, for context in the letter")
+    s.add_argument("--applicants", type=int, help="how many applied")
+    s.add_argument("--note", default="", help="anything specific to say to this person")
+    s.add_argument("--mark-sent", action="store_true", help="record that it has gone out")
+    s.set_defaults(func=cmd_decline)
+
+    s = sub.add_parser(
+        "feedback-queue", help="declined applicants still owed feedback (exit 1 if any)"
+    )
+    s.add_argument("--program", required=True)
+    s.set_defaults(func=cmd_feedback_queue)
 
     s = sub.add_parser("accept", help="record an acceptance and print the letter")
     s.add_argument("--program", required=True)
