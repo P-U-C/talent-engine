@@ -18,8 +18,8 @@ Zero dependencies for scoring — Python 3.10+ standard library only. A candidat
 must be able to clone this and reproduce their number with no install step.
 
 ```
-git clone <repo> && cd talent-engine
-python3 -m pytest tests/ -q          # 49 tests
+git clone https://github.com/P-U-C/talent-engine && cd talent-engine
+python3 -m pytest tests/ -q          # 50 tests
 ```
 
 `cryptography` is needed only for GitHub App authentication. PyYAML is optional
@@ -98,7 +98,7 @@ and what `verify` checks.
 
 Working: rubric, flags, config validation, GitHub client (auth/cache/budget),
 collector, scout, monitor, measure, persistence, audit log + replay, CSV
-ingest, dossiers, CLI. 49 tests, no network required.
+ingest, dossiers, CLI. 50 tests, no network required.
 
 Not yet built: HTTP API and UI, webhook ingestion, the optional LLM pass for
 free-text, and a real-world calibration run against known-good profiles.
