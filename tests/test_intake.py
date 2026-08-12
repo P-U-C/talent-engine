@@ -536,3 +536,33 @@ def test_the_page_states_that_a_score_is_not_a_decision(live_page):
     _status, body, _headers = get(url + "/")
     assert "A score is not a decision" in body
     assert "shortlist" in body
+
+
+def test_the_test_suite_cannot_send_a_real_notification():
+    """A regression guard for a bug that reached a real person's phone.
+
+    notify.py used to fall back to a bot token on disk when the environment
+    had none, so merely running pytest delivered live messages. Credentials
+    now come from the environment only, and conftest sets the kill switch.
+    """
+    from talent_engine import notify
+
+    assert notify.disabled(), "conftest should have disabled notifications"
+    assert not hasattr(notify, "FALLBACK_ENV"), "no credential fallback may exist"
+
+    # Even fully configured, a disabled notifier sends nothing.
+    import os
+
+    for key, value in {
+        "TELEGRAM_BOT_TOKEN": "x",
+        "TELEGRAM_CHAT_ID": "y",
+        "SMTP_HOST": "smtp.invalid",
+        "NOTIFY_EMAIL_TO": "nobody@invalid",
+    }.items():
+        os.environ[key] = value
+    try:
+        assert notify.send("this must not go anywhere") is False
+        assert notify.send_email("subject", "body") is False
+    finally:
+        for key in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "SMTP_HOST", "NOTIFY_EMAIL_TO"):
+            os.environ.pop(key, None)

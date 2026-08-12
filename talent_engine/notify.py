@@ -35,34 +35,32 @@ import urllib.parse
 import urllib.request
 from email.message import EmailMessage
 from email.utils import formataddr
-from pathlib import Path
 from typing import Any
 
 log = logging.getLogger("talent_engine.notify")
 
-# Where the rest of this machine keeps its bot credentials, used when the
-# service env does not carry its own.
-FALLBACK_ENV = Path.home() / ".claude" / "channels" / "telegram" / ".env"
+# Set by conftest.py, and available to anyone running the code by hand.
+DISABLE_ENV = "TALENT_ENGINE_NOTIFY_DISABLED"
 
 
-def _from_env_file(path: Path, key: str) -> str:
-    try:
-        for line in path.read_text().splitlines():
-            if line.startswith(f"{key}="):
-                return line.split("=", 1)[1].strip()
-    except OSError:
-        pass
-    return ""
+def disabled() -> bool:
+    """Hard off switch.
+
+    This exists because the module used to fall back to reading a bot token
+    off disk when the environment had none, which meant importing it was
+    enough to send real messages — the test suite delivered a burst of
+    notifications to a real person's phone. Credentials now come from the
+    environment only, and the test suite additionally sets this.
+    """
+    return os.environ.get(DISABLE_ENV, "").strip() not in ("", "0", "false")
 
 
 def credentials() -> tuple[str, str]:
-    token = os.environ.get("TELEGRAM_BOT_TOKEN") or _from_env_file(
-        FALLBACK_ENV, "TELEGRAM_BOT_TOKEN"
+    """Telegram credentials, from the environment and nowhere else."""
+    return (
+        os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+        os.environ.get("TELEGRAM_CHAT_ID", ""),
     )
-    chat = os.environ.get("TELEGRAM_CHAT_ID") or _from_env_file(
-        FALLBACK_ENV, "TELEGRAM_CHAT_ID"
-    )
-    return token, chat
 
 
 def mail_config() -> dict[str, str]:
@@ -82,13 +80,16 @@ def mail_config() -> dict[str, str]:
     }
 
 
-def send_email(subject: str, body: str, *, timeout: int = 30) -> bool:
+def send_email(subject: str, body: str, *, timeout: int = 30) -> bool:  # noqa: D401
     """Send over an authenticated relay. Never raises.
 
     Port 25 out of this host is blocked and unauthenticated mail from it would
     be filtered anyway, so this deliberately requires a relay with credentials
     rather than falling back to a local MTA that would silently defer forever.
     """
+    if disabled():
+        log.debug("notifications disabled; email suppressed")
+        return False
     cfg = mail_config()
     if not cfg:
         return False
@@ -133,6 +134,9 @@ def notify(subject: str, body: str, telegram_body: str | None = None) -> bool:
 
 def send(text: str, *, timeout: int = 20) -> bool:
     """Telegram. Best effort. Returns whether it went out; never raises."""
+    if disabled():
+        log.debug("notifications disabled; telegram suppressed")
+        return False
     token, chat = credentials()
     if not token or not chat:
         log.debug("no telegram credentials; notification skipped")
