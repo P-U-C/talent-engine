@@ -27,6 +27,7 @@ from .model import Application
 from .modes.monitor import assess, measure as measure_deltas
 from .modes.scout import Scout
 from .report import dossier, ranked_table, scores_to_csv, scores_to_json
+from .scoring.concerns import concerns
 from .scoring.engine import CODE_VERSION, rank, score_snapshot
 from .store.db import Store
 
@@ -97,11 +98,14 @@ def cmd_score(args) -> int:
 
 def _emit(ordered, cfg, args) -> None:
     if args.format == "json":
-        print(scores_to_json(ordered))
+        print(scores_to_json(ordered, cfg))
     elif args.format == "csv":
         print(scores_to_csv(ordered))
     else:
         print(ranked_table(ordered, limit=args.limit))
+        print()
+        for s in ordered[: args.limit or None]:
+            print(f"  {s.handle}: {concerns(s, cfg)}")
     if args.dossier_dir:
         out = Path(args.dossier_dir)
         out.mkdir(parents=True, exist_ok=True)
@@ -289,6 +293,8 @@ def cmd_submissions(args) -> int:
             total = "" if r["total"] is None else f"{r['total']:.2f}"
             note = r["error"] or r["run_id"]
             print(f"{r['received_at']}  {r['status']:<10} {r['handle']:<20} {total:>6}  {note}")
+            if r["concerns"]:
+                print(f"{'':<26} {r['concerns']}")
     store.close()
     return 0
 

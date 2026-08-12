@@ -33,6 +33,7 @@ from ..config import ProgramConfig
 from ..github.collector import Collector
 from ..ingest.tally import Submission, TallyPayloadError, parse_webhook, verify_signature
 from ..model import Application, utc_now_iso
+from ..scoring.concerns import concerns
 from ..scoring.engine import CODE_VERSION, score_snapshot
 from ..store.db import Store
 
@@ -182,8 +183,11 @@ class IntakeService:
         self._store.save_snapshot(snap)
         score = score_snapshot(snap, self.cfg)
         self._store.save_score(run_id, score)
-        self._store.finish_submission(submission_id, "scored", run_id=run_id, total=score.total)
-        log.info("scored %s: %.2f (run %s)", row["handle"], score.total, run_id)
+        caveat = concerns(score, self.cfg, snap)
+        self._store.finish_submission(
+            submission_id, "scored", run_id=run_id, total=score.total, concerns=caveat
+        )
+        log.info("scored %s: %.2f (run %s) — %s", row["handle"], score.total, run_id, caveat)
 
     def _run_for_today(self) -> str:
         """One run per UTC day, so a rolling intake still groups into cohorts.

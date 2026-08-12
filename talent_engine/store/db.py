@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS submissions (
     status TEXT NOT NULL,          -- queued | scored | unparsable | error
     run_id TEXT DEFAULT '',
     total REAL,
+    concerns TEXT DEFAULT '',
     error TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_submissions_status ON submissions(status);
@@ -334,12 +335,18 @@ class Store:
 
     def finish_submission(
         self, submission_id: str, status: str, run_id: str = "", total: float | None = None,
-        error: str = "",
+        error: str = "", concerns: str = "",
     ) -> None:
+        """Record the outcome. `concerns` travels with the number by design.
+
+        A score stored on its own gets read as a verdict; the caveat sentence
+        is stored alongside it so no consumer of this table can show one
+        without the other.
+        """
         self.conn.execute(
-            "UPDATE submissions SET status = ?, run_id = ?, total = ?, error = ? "
-            "WHERE submission_id = ?",
-            (status, run_id, total, error[:500], submission_id),
+            "UPDATE submissions SET status = ?, run_id = ?, total = ?, concerns = ?, "
+            "error = ? WHERE submission_id = ?",
+            (status, run_id, total, concerns, error[:500], submission_id),
         )
         self.conn.commit()
 

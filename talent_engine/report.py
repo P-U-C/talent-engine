@@ -14,7 +14,8 @@ import json
 from typing import Any, Iterable
 
 from .config import ProgramConfig
-from .model import CandidateScore
+from .model import CandidateScore, ProfileSnapshot
+from .scoring.concerns import concerns
 
 SEVERITY_MARK = {"critical": "!!", "warn": " !", "review": " ?"}
 
@@ -37,8 +38,17 @@ def ranked_table(scores: Iterable[CandidateScore], *, limit: int | None = None) 
     return "\n".join(out)
 
 
-def dossier(score: CandidateScore, cfg: ProgramConfig) -> str:
-    """Markdown evidence dossier for one candidate."""
+def dossier(
+    score: CandidateScore,
+    cfg: ProgramConfig,
+    snapshot: ProfileSnapshot | None = None,
+) -> str:
+    """Markdown evidence dossier for one candidate.
+
+    `snapshot` is optional but sharpens the caveat line: some of what a
+    reviewer should be sceptical about is visible in the raw activity rather
+    than in the score.
+    """
     lines: list[str] = []
     add = lines.append
 
@@ -52,6 +62,8 @@ def dossier(score: CandidateScore, cfg: ProgramConfig) -> str:
         f"Automated signal: **{score.automated_total:.2f}** · "
         f"Application-declared: **{score.application_total:.2f}**"
     )
+    add("")
+    add(f"> {concerns(score, cfg, snapshot)}")
     add("")
 
     if score.flags:
@@ -129,5 +141,19 @@ def scores_to_csv(scores: Iterable[CandidateScore]) -> str:
     return buf.getvalue()
 
 
-def scores_to_json(scores: Iterable[CandidateScore]) -> str:
-    return json.dumps([s.to_dict() for s in scores], indent=2)
+def scores_to_json(
+    scores: Iterable[CandidateScore], cfg: ProgramConfig | None = None
+) -> str:
+    """JSON export. Carries the caveat sentence when a config is supplied.
+
+    Machine consumers are the most likely to treat a bare number as a verdict,
+    so the sentence travels with the score rather than living only in the
+    human-facing dossier.
+    """
+    rows = []
+    for s in scores:
+        row = s.to_dict()
+        if cfg is not None:
+            row["concerns"] = concerns(s, cfg)
+        rows.append(row)
+    return json.dumps(rows, indent=2)
