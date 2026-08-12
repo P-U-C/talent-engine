@@ -79,6 +79,7 @@ PAGE_CSS = """
   --orange: #eb4b24;
   --orange-deep: #dc331a;
   --peach: #f9c7af;
+  --peach-pale: #fce5d8;
   --mint: #68a9a3;
   --mint-light: #b4dbd4;
   --green-600: #346d6a;
@@ -86,117 +87,135 @@ PAGE_CSS = """
   --bg: var(--cream);
   --surface: #ffffff;
   --ink: var(--forest);
-  --muted: #515151;
-  --line: #e6ddd6;
+  --muted: #4c5a5a;
+  --line: #e8ded6;
   --accent: var(--orange-deep);
-}
-:root:not([data-theme="light"]) {
-  color-scheme: light;
+  --hero-bg: var(--forest);
+  --hero-ink: #ffffff;
+  --hero-muted: #b7c6c4;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0d1718;
-    --surface: #152526;
-    --ink: #f2ece7;
-    --muted: #a9b5b4;
-    --line: #24393a;
-    --accent: #ff7a55;
+    --bg: #0c1516;
+    --surface: #142425;
+    --ink: #f3ede8;
+    --muted: #9fb0ae;
+    --line: #22383a;
+    --accent: #ff7d58;
+    --hero-bg: #081011;
+    --hero-ink: #fef4ee;
+    --hero-muted: #9fb0ae;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0d1718;
-  --surface: #152526;
-  --ink: #f2ece7;
-  --muted: #a9b5b4;
-  --line: #24393a;
-  --accent: #ff7a55;
-  color-scheme: dark;
+  --bg: #0c1516; --surface: #142425; --ink: #f3ede8; --muted: #9fb0ae;
+  --line: #22383a; --accent: #ff7d58; --hero-bg: #081011;
+  --hero-ink: #fef4ee; --hero-muted: #9fb0ae; color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
 body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--ink);
-  font: 17px/1.65 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 17px/1.7 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
 }
-.wrap { max-width: 44rem; margin: 0 auto; padding: 3rem 1.5rem 5rem; }
 
-.logo { height: 2.5rem; width: auto; color: var(--ink); display: block; }
-header { margin-bottom: 3.5rem; }
-
+/* --- hero ------------------------------------------------------------ */
+/* Prezenti lead with a dark forest band and reversed type; the page opens
+   the way their site does rather than as a white document with a logo on it. */
+.hero { background: var(--hero-bg); color: var(--hero-ink); padding: 3.5rem 0 4.5rem; }
+.hero .inner { max-width: 52rem; margin: 0 auto; padding: 0 1.5rem; }
+.logo {
+  width: min(19rem, 62vw); height: auto; display: block;
+  color: var(--hero-ink); margin-bottom: 4rem;
+}
 h1 {
   font-family: 'Outfit', sans-serif;
-  font-size: clamp(2rem, 5.5vw, 3rem);
-  line-height: 1.08;
-  letter-spacing: -0.025em;
-  font-weight: 600;
-  margin: 0 0 1.25rem;
+  font-size: clamp(2.4rem, 6.4vw, 3.9375rem);
+  line-height: 1.1;
+  /* Their display scale carries positive tracking at weight 500 — the
+     opposite of the usual big-heading instinct, and it is what makes the
+     type read as theirs. */
+  letter-spacing: 0.06em;
+  font-weight: 500;
+  margin: 0 0 1.5rem;
+  max-width: 16ch;
 }
+.lede {
+  font-size: clamp(1.1rem, 2.2vw, 1.3rem);
+  line-height: 1.55; color: var(--hero-muted);
+  margin: 0; max-width: 40ch;
+}
+.chips { margin: 2.5rem 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.chips li {
+  border: 1px solid rgba(255,255,255,0.28); color: var(--hero-muted);
+  border-radius: 999rem; padding: 0.4rem 0.95rem; font-size: 0.9rem;
+}
+
+/* --- body ------------------------------------------------------------ */
+.wrap { max-width: 52rem; margin: 0 auto; padding: 4rem 1.5rem 5rem; }
 h2 {
   font-family: 'Outfit', sans-serif;
-  font-size: 1.3rem;
-  letter-spacing: -0.015em;
-  font-weight: 600;
-  margin: 3.5rem 0 1rem;
+  font-size: clamp(1.6rem, 3.4vw, 2.4375rem);
+  line-height: 1.1; letter-spacing: 0.02em; font-weight: 500;
+  margin: 4rem 0 1.25rem;
 }
-p { margin: 0 0 1.1rem; }
-.lede { font-size: 1.2rem; color: var(--muted); margin-bottom: 2rem; max-width: 34rem; }
+h2:first-of-type { margin-top: 0; }
+p { margin: 0 0 1.15rem; max-width: 46rem; }
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
 
-a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
-
-ul.signals { list-style: none; padding: 0; margin: 0 0 1.5rem; }
-ul.signals li {
-  padding: 0.9rem 0 0.9rem 1.6rem;
-  border-bottom: 1px solid var(--line);
-  position: relative;
+/* Numbered signals: the four things that carry the weight. */
+ol.signals { list-style: none; counter-reset: s; padding: 0; margin: 1.75rem 0 1.5rem; }
+ol.signals li {
+  counter-increment: s; position: relative;
+  padding: 1.15rem 0 1.15rem 3.25rem;
+  border-top: 1px solid var(--line);
 }
-ul.signals li:before {
-  content: "";
-  position: absolute; left: 0; top: 1.5rem;
-  width: 0.55rem; height: 0.55rem; border-radius: 50%;
-  background: var(--mint);
+ol.signals li:last-child { border-bottom: 1px solid var(--line); }
+ol.signals li:before {
+  content: counter(s, decimal-leading-zero);
+  position: absolute; left: 0; top: 1.15rem;
+  font-family: 'Outfit', sans-serif; font-size: 0.95rem; font-weight: 500;
+  color: var(--mint); letter-spacing: 0.06em;
 }
-ul.signals strong { font-weight: 500; }
+ol.signals strong { font-weight: 500; }
 
 .card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 1.5rem 1.6rem;
-  margin: 1.75rem 0;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 1rem; padding: 1.75rem 1.85rem; margin: 2rem 0;
 }
-.card.accent { border-left: 3px solid var(--accent); }
+.card.accent { border-left: 4px solid var(--accent); }
+.card h3 {
+  font-family: 'Outfit', sans-serif; font-weight: 500; font-size: 1.2rem;
+  letter-spacing: 0.02em; margin: 0 0 0.75rem;
+}
 
 code {
   font: 0.85em ui-monospace, SFMono-Regular, Menlo, monospace;
-  background: rgba(104,169,163,0.16);
-  padding: 0.15em 0.4em; border-radius: 4px;
+  background: rgba(104,169,163,0.18); padding: 0.15em 0.45em; border-radius: 4px;
 }
 pre {
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 1rem 1.1rem;
-  overflow-x: auto;
-  font-size: 0.85rem;
-  margin: 1rem 0 0;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  padding: 1.1rem 1.2rem; overflow-x: auto; font-size: 0.85rem; margin: 1.1rem 0 0;
 }
 pre code { background: none; padding: 0; }
 
-.form-frame {
-  width: 100%; min-height: 44rem;
-  border: 1px solid var(--line); border-radius: 14px;
-  background: var(--surface);
+.note {
+  border-left: 3px solid var(--mint); padding: 0.15rem 0 0.15rem 1.1rem;
+  color: var(--muted); margin: 1.5rem 0;
 }
 
-footer {
-  margin-top: 4rem; padding-top: 1.75rem;
-  border-top: 1px solid var(--line);
-  color: var(--muted); font-size: 0.92rem;
+.form-frame {
+  width: 100%; min-height: 46rem; border: 1px solid var(--line);
+  border-radius: 1rem; background: var(--surface); margin-top: 1.5rem;
 }
+
+footer { background: var(--hero-bg); color: var(--hero-muted); padding: 3rem 0; }
+footer .inner { max-width: 52rem; margin: 0 auto; padding: 0 1.5rem; font-size: 0.95rem; }
+footer a { color: var(--peach); }
+footer .mark { width: 9rem; height: auto; color: var(--hero-ink); opacity: 0.85; margin-bottom: 1.5rem; display: block; }
 """
 
 
@@ -253,17 +272,26 @@ against a rubric you can read and reproduce.">
 <style>{_font_face()}{PAGE_CSS}</style>
 </head>
 <body>
+
+<section class="hero">
+  <div class="inner">
+    {_logo_svg()}
+    <h1>{headline}</h1>
+    <p class="lede">{lede}</p>
+    <ul class="chips">
+      <li>Open to builders anywhere</li>
+      <li>Public rubric</li>
+      <li>Evidence-linked scoring</li>
+    </ul>
+  </div>
+</section>
+
 <div class="wrap">
-
-<header>{_logo_svg()}</header>
-
-<h1>{headline}</h1>
-<p class="lede">{lede}</p>
 
 <h2>How you are assessed</h2>
 <p>Your public code activity is scored against a fixed rubric. Four signals
-carry most of the weight:</p>
-<ul class="signals">
+carry most of the weight.</p>
+<ol class="signals">
   <li><strong>Origination.</strong> You create things that did not exist.
       Forking is free; originating is not.</li>
   <li><strong>Finishing.</strong> Most side projects die around commit three.
@@ -273,17 +301,18 @@ carry most of the weight:</p>
       activity, which is much harder to inflate than a commit count.</li>
   <li><strong>Acceptance.</strong> Other people merged your work, across
       several different projects.</li>
-</ul>
-<p>Stars and follower counts are not scored at any weight. They measure
-access, and access is exactly what this is built to look past.</p>
+</ol>
+<p class="note">Stars and follower counts are not scored at any weight. They
+measure access, and access is exactly what this is built to look past.</p>
 
 <div class="card accent">
-<p><strong>You can check our work.</strong> The rubric is published in full,
-along with the code that applies it. Clone it and reproduce your own score:</p>
+<h3>You can check our work</h3>
+<p>The rubric is published in full, along with the code that applies it. Clone
+it and reproduce your own score:</p>
 <pre><code>git clone {REPO_URL}
 cd talent-engine
 talent-engine score --handles YOUR_GITHUB_HANDLE</code></pre>
-<p style="margin-top:1rem">If a number looks wrong to you, you can show us
+<p style="margin-top:1.1rem">If a number looks wrong to you, you can show us
 exactly where — which is the point of publishing it. Every score comes with
 linked evidence for each component; a score with no evidence behind it cannot
 be produced.</p>
@@ -291,9 +320,10 @@ be produced.</p>
 
 <h2>A score is not a decision</h2>
 <p>The automated score produces a shortlist. People decide, after reading the
-evidence and talking to you. No one is funded or refused by a number, and the
-checks that flag manipulated profiles are published alongside the rubric —
-including an honest account of what they do not yet catch.</p>
+evidence and talking to you. No one is funded or refused by a number.</p>
+<p>The checks that flag manipulated profiles are published alongside the
+rubric — including an honest account of what they do not yet catch. We would
+rather tell you that than imply a precision the method does not have.</p>
 
 <h2>What we collect</h2>
 <p>Public code activity only. Nothing about your background is inferred —
@@ -305,13 +335,17 @@ an assessment record.</p>
 <h2>Apply</h2>
 {_embed(form_id)}
 
+</div>
+
 <footer>
-{extra_footer}
-<p>Scoring engine: <a href="{REPO_URL}">talent-engine</a> — open source,
-including the rubric, the anti-gaming checks, and their known limits.</p>
+  <div class="inner">
+    {_logo_svg().replace('class="logo"', 'class="mark"', 1)}
+    {extra_footer}
+    <p>Scoring engine: <a href="{REPO_URL}">talent-engine</a> — open source,
+    including the rubric, the anti-gaming checks, and their known limits.</p>
+  </div>
 </footer>
 
-</div>
 </body>
 </html>
 """.encode()
