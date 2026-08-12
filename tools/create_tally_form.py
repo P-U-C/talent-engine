@@ -30,15 +30,12 @@ from pathlib import Path
 API_ROOT = "https://api.tally.so"
 API_VERSION = "2025-02-01"  # pinned: the API is versioned by date
 
-# Spec type -> (Tally block type, group type). A question is two blocks sharing
-# a groupUuid: the visible label, then the input.
-BLOCK_TYPES = {
-    "INPUT_TEXT": "INPUT_TEXT",
-    "INPUT_EMAIL": "INPUT_EMAIL",
-    "TEXTAREA": "TEXTAREA",
-    "CHECKBOX": "CHECKBOX",
-    "MULTIPLE_CHOICE_OPTION": "MULTIPLE_CHOICE_OPTION",
-}
+# A question is a TITLE block followed by its input block, each with its OWN
+# groupUuid — the API rejects a TITLE that shares a group with an input
+# ("TITLE block must not share groupUuid with an input block"). The label the
+# webhook reports is taken from the preceding TITLE, so the association is
+# positional. That is why the spec's question order is also the block order.
+INPUT_TYPES = {"INPUT_TEXT", "INPUT_EMAIL", "TEXTAREA"}
 
 
 def _uuid() -> str:
@@ -55,54 +52,62 @@ def build_blocks(spec: dict) -> list[dict]:
             "type": "FORM_TITLE",
             "groupUuid": title_uuid,
             "groupType": "TEXT",
-            "payload": {"title": spec["title"], "html": f"<h1>{spec['title']}</h1>"},
+            "payload": {"title": spec["title"], "safeHTMLSchema": [[spec["title"]]]},
         }
     )
 
     for q in spec["questions"]:
-        block_type = BLOCK_TYPES.get(q["type"])
-        if not block_type:
-            raise ValueError(f"unknown question type {q['type']!r} in {q['label']!r}")
-
-        group = _uuid()
-        # The label block. This is what arrives as `label` in the webhook, and
+        # The label block. This is what arrives as `label` in the webhook and
         # what the parser matches on — see forms/*.json for why it is fixed.
+        label_uuid = _uuid()
         blocks.append(
             {
-                "uuid": _uuid(),
+                "uuid": label_uuid,
                 "type": "TITLE",
-                "groupUuid": group,
+                "groupUuid": label_uuid,
                 "groupType": "QUESTION",
-                "payload": {"title": q["label"], "html": q["label"]},
+                "payload": {"safeHTMLSchema": [[q["label"]]]},
             }
         )
 
         if q["type"] == "CHECKBOX":
-            # Checkboxes are one block per option, all sharing the group.
-            for option in q.get("options", []):
+            # Tally has no distinct checkbox block: it is a multiple choice
+            # with allowMultiple, one block per option, all sharing a group.
+            options = q.get("options", [])
+            group = _uuid()
+            for i, option in enumerate(options):
                 blocks.append(
                     {
                         "uuid": _uuid(),
-                        "type": "CHECKBOX",
+                        "type": "MULTIPLE_CHOICE_OPTION",
                         "groupUuid": group,
-                        "groupType": "CHECKBOXES",
+                        "groupType": "MULTIPLE_CHOICE",
                         "payload": {
-                            "index": len(blocks),
+                            "index": i,
                             "text": option,
                             "isRequired": bool(q.get("required")),
+                            "isFirst": i == 0,
+                            "isLast": i == len(options) - 1,
+                            "allowMultiple": True,
                         },
                     }
                 )
-        else:
+        elif q["type"] in INPUT_TYPES:
+            input_uuid = _uuid()
             blocks.append(
                 {
-                    "uuid": _uuid(),
-                    "type": block_type,
-                    "groupUuid": group,
-                    "groupType": block_type,
-                    "payload": {"isRequired": bool(q.get("required"))},
+                    "uuid": input_uuid,
+                    "type": q["type"],
+                    "groupUuid": input_uuid,
+                    "groupType": q["type"],
+                    "payload": {
+                        "isRequired": bool(q.get("required")),
+                        "placeholder": q.get("placeholder", ""),
+                    },
                 }
             )
+        else:
+            raise ValueError(f"unknown question type {q['type']!r} in {q['label']!r}")
 
     return blocks
 
@@ -116,6 +121,11 @@ def call(method: str, path: str, key: str, body: dict | None = None) -> dict:
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
             "tally-version": API_VERSION,
+            # api.tally.so sits behind Cloudflare, which rejects the default
+            # Python-urllib agent with a 403 / error 1010 before the request
+            # reaches Tally at all. The failure looks exactly like a bad API
+            # key, so it is worth the explicit header and this comment.
+            "User-Agent": "talent-engine/0.1 (+https://github.com/P-U-C/talent-engine)",
         },
     )
     try:
