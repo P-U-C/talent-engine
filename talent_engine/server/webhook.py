@@ -74,6 +74,10 @@ class IntakeService:
         # `self._lock`.
         self._intake_store = Store(db_path, shared=True)
         self._run_ids: dict[str, str] = {}  # utc date -> run_id
+        # Scoring failures are usually transient (GitHub outage, expired token),
+        # and nothing outside will retry once Tally has its 202.
+        self._attempts: dict[str, int] = {}
+        self.max_attempts = 3
         self._worker: threading.Thread | None = None
         self.accepted = 0
         self.duplicates = 0
@@ -163,10 +167,27 @@ class IntakeService:
                     self._score_one(item, collector)
                 except Exception as exc:  # a bad applicant must not kill intake
                     log.exception("scoring %s failed", item)
+                    # A transient failure — GitHub down, token expired, rate
+                    # limit exhausted — must not strand a real applicant.
+                    # Tally already received its 202, so nothing external will
+                    # ever retry; the row stays `queued` and a restart or the
+                    # next drain picks it up. Only a submission that has failed
+                    # repeatedly is parked as `error` for a human.
+                    attempts = self._attempts.get(item, 0) + 1
+                    self._attempts[item] = attempts
+                    terminal = attempts >= self.max_attempts
                     try:
-                        self._store.finish_submission(item, "error", error=repr(exc))
+                        self._store.finish_submission(
+                            item,
+                            "error" if terminal else "queued",
+                            error=f"attempt {attempts}: {exc!r}",
+                        )
                     except Exception:
                         log.exception("could not record failure for %s", item)
+                    if terminal:
+                        log.error(
+                            "%s failed %d times; parked for a human", item, attempts
+                        )
                 finally:
                     self._q.task_done()
         finally:
@@ -260,7 +281,10 @@ def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[st
                 # rather than fetched so the page makes no external request.
                 "default-src 'none'; style-src 'unsafe-inline'; font-src data:; "
                 "img-src data:; frame-src https://tally.so; form-action 'none'; "
-                "base-uri 'none'",
+                # Nobody frames this page. It carries an organisation's name and
+                # an application form, which is exactly what a clickjacker or a
+                # lookalike site would want to wrap.
+                "base-uri 'none'; frame-ancestors 'none'",
             )
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")

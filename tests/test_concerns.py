@@ -101,5 +101,7 @@ def test_the_sentence_travels_with_the_json_export(cfg):
     rows = json.loads(scores_to_json(scores, cfg))
     assert all(row.get("concerns") for row in rows)
 
+    # Without a config the field is still present, and says so explicitly —
+    # a missing key reads as "no concerns", which must never be implied.
     bare = json.loads(scores_to_json(scores))
-    assert all("concerns" not in row for row in bare)
+    assert all(row["concerns"].startswith("not evaluated") for row in bare)

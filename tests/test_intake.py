@@ -375,8 +375,12 @@ def test_a_crash_mid_scoring_leaves_the_submission_recoverable(tmp_path):
 
     store = Store(service.db_path)
     row = store.get_submission("sub_1")
-    assert row["status"] == "error"
+    # Recoverable means retryable. This previously asserted `error`, which was
+    # a dead end: nothing outside retries once Tally has its 202, so the row
+    # was stored, unscored and invisible to the requeue path forever.
+    assert row["status"] == "queued"
     assert "github fell over" in row["error"]
+    assert store.pending_submissions(cfg.key)
     store.close()
 
 
@@ -566,3 +570,56 @@ def test_the_test_suite_cannot_send_a_real_notification():
     finally:
         for key in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "SMTP_HOST", "NOTIFY_EMAIL_TO"):
             os.environ.pop(key, None)
+
+
+def test_a_transient_scoring_failure_leaves_the_submission_retryable(tmp_path):
+    """Tally already had its 202, so nothing external will ever retry.
+
+    A GitHub outage or an expired token used to park a real applicant as
+    `error` permanently — stored, unscored, unnotified, and invisible to the
+    requeue-on-restart path, which only picks up `queued`.
+    """
+    cfg = load_program("celo-trial")
+
+    class Flaky:
+        def __init__(self):
+            self.calls = 0
+
+        def collect(self, handle, application):
+            self.calls += 1
+            raise RuntimeError("github 503")
+
+    flaky = Flaky()
+    service = IntakeService(cfg, str(tmp_path / "t.db"), collector_factory=lambda: flaky)
+    service.start()
+    service.accept(parse_webhook(payload([f("GitHub", "octocat")])))
+    service.stop(drain=True)
+
+    store = Store(service.db_path)
+    row = store.get_submission("sub_1")
+    assert row["status"] == "queued", "a transient failure must stay retryable"
+    assert "attempt 1" in row["error"]
+    # And a restart would pick it up again.
+    assert store.pending_submissions(cfg.key)
+    store.close()
+
+
+def test_a_repeatedly_failing_submission_is_eventually_parked(tmp_path):
+    """Retrying forever would spin the worker on a permanently broken row."""
+    cfg = load_program("celo-trial")
+
+    class AlwaysBroken:
+        def collect(self, handle, application):
+            raise RuntimeError("nope")
+
+    service = IntakeService(cfg, str(tmp_path / "t.db"), collector_factory=lambda: AlwaysBroken())
+    service.start()
+    service.accept(parse_webhook(payload([f("GitHub", "octocat")])))
+    for _ in range(service.max_attempts):
+        service.requeue_pending()
+        service._q.join()
+    service.stop(drain=True)
+
+    store = Store(service.db_path)
+    assert store.get_submission("sub_1")["status"] == "error"
+    store.close()

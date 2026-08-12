@@ -127,6 +127,12 @@ class Store:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(str(self.path), check_same_thread=not shared)
+        # The contacts table holds applicant PII, so the quarantine has to be a
+        # filesystem boundary as well as a schema convention. sqlite creates its
+        # database and WAL with the process umask, which left them world
+        # readable on the live host; every process on the box could read
+        # applicant emails despite the code-level separation.
+        self._restrict_permissions()
         self.conn.row_factory = sqlite3.Row
         # Intake and scoring hold separate connections to the same file, so a
         # writer must not lock the other out: WAL lets them overlap, and the
@@ -136,6 +142,16 @@ class Store:
         self.conn.execute("PRAGMA busy_timeout=5000")
         self.conn.executescript(SCHEMA)
         self.conn.commit()
+
+    def _restrict_permissions(self) -> None:
+        """0600 on the database and its sidecars. Best effort, never fatal."""
+        for suffix in ("", "-wal", "-shm"):
+            candidate = Path(f"{self.path}{suffix}")
+            try:
+                if candidate.exists():
+                    candidate.chmod(0o600)
+            except OSError:  # a read-only mount or foreign owner must not stop a run
+                pass
 
     # ------------------------------------------------------------------ runs
 

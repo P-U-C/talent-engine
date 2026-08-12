@@ -144,16 +144,20 @@ def scores_to_csv(scores: Iterable[CandidateScore]) -> str:
 def scores_to_json(
     scores: Iterable[CandidateScore], cfg: ProgramConfig | None = None
 ) -> str:
-    """JSON export. Carries the caveat sentence when a config is supplied.
+    """JSON export. The caveat sentence always travels with the score.
 
-    Machine consumers are the most likely to treat a bare number as a verdict,
-    so the sentence travels with the score rather than living only in the
-    human-facing dossier.
+    Machine consumers are the ones most likely to treat a bare number as a
+    verdict, so when no config is supplied this emits an explicit marker rather
+    than silently omitting the field — an absent key reads as "no concerns",
+    which is the one thing this must never imply.
     """
     rows = []
     for s in scores:
         row = s.to_dict()
-        if cfg is not None:
-            row["concerns"] = concerns(s, cfg)
+        row["concerns"] = (
+            concerns(s, cfg)
+            if cfg is not None
+            else "not evaluated — export without a program config"
+        )
         rows.append(row)
     return json.dumps(rows, indent=2)

@@ -102,18 +102,10 @@ def main() -> int:
         conn.close()
         return 0
 
-    # Record before notifying: a failed send is better than reporting the same
-    # person every morning because the write never happened.
     now = utc_now_iso()
-    conn.executemany(
-        "INSERT OR IGNORE INTO scouted (program, handle, first_seen, channels) "
-        "VALUES (?, ?, ?, ?)",
-        [(cfg.key, c["handle"], now, ",".join(c.get("channels") or [])) for c in fresh],
-    )
-    conn.commit()
-    conn.close()
-
     if not to_score:
+        _remember(conn, cfg.key, fresh, now)
+        conn.close()
         return 0
 
     # Score them. Discovery says "this person exists"; the score and its caveat
@@ -143,8 +135,30 @@ def main() -> int:
 
     scored.sort(key=lambda c: -c["total"])
     print(f"scored {len(scored)}; top {min(args.limit, len(scored))} sent", file=sys.stderr)
-    scout_digest(scored, cfg.name, limit=args.limit)
+
+    # Only mark people reported once the report actually went out. Recording
+    # first meant a failed send silently buried those candidates forever: they
+    # counted as seen, so they never appeared in another digest, and the only
+    # trace was a log line nobody reads.
+    if scout_digest(scored, cfg.name, limit=args.limit):
+        _remember(conn, cfg.key, fresh, now)
+    else:
+        print(
+            "digest was not delivered; candidates left unrecorded so tomorrow "
+            "reports them again",
+            file=sys.stderr,
+        )
+    conn.close()
     return 0
+
+
+def _remember(conn, program: str, candidates: list[dict], now: str) -> None:
+    conn.executemany(
+        "INSERT OR IGNORE INTO scouted (program, handle, first_seen, channels) "
+        "VALUES (?, ?, ?, ?)",
+        [(program, c["handle"], now, ",".join(c.get("channels") or [])) for c in candidates],
+    )
+    conn.commit()
 
 
 if __name__ == "__main__":
