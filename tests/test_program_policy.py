@@ -84,4 +84,125 @@ def _policy_dict():
         "monitoring": copy.deepcopy(policy.monitoring),
         "giveback": copy.deepcopy(policy.giveback),
         "kpis": copy.deepcopy(policy.kpis),
+        "upside": copy.deepcopy(policy.upside),
+        "commitments_to_recipient": copy.deepcopy(policy.commitments_to_recipient),
     }
+
+
+# --------------------------------------------------------------- terms v2
+#
+# The terms are enforced here rather than described in a document, for the
+# same reason every other invariant in this repo is: a policy that lives only
+# in prose drifts the first time someone is in a hurry.
+
+
+def _overlay(**giveback_overrides):
+    """A minimal valid overlay, so each test can break exactly one thing."""
+    from talent_engine.programs.policy import ProgramOverlay
+
+    giveback = {
+        "total_bps": 200,
+        "cap_multiple_of_sponsorship": 10,
+        "sunset_months_after_term": 36,
+        "prorated_by_months_received": True,
+        "recipients": [{"name": "A", "bps": 100}, {"name": "B", "bps": 100}],
+    }
+    giveback.update(giveback_overrides)
+    return ProgramOverlay.from_dict(
+        {
+            "key": "t",
+            "name": "T",
+            "scoring_program": "p",
+            "seats": 2,
+            "duration_months": 4,
+            "budget_usd": 800,
+            "benefits": [{"key": "b", "monthly_usd": 100, "months": 4}],
+            "selection": {
+                "automated_final_selection": False,
+                "human_verification_required": True,
+                "build_plan_required": True,
+            },
+            "monitoring": {"inactivity_review_days": 30, "cure_days": 7},
+            "giveback": giveback,
+            "commitments_to_recipient": {
+                "retains_all_ip_and_equity": True,
+                "may_withdraw_without_penalty": True,
+            },
+        }
+    )
+
+
+def test_an_uncapped_giveback_is_refused():
+    """The encumbrance a later investor asks to have removed."""
+    with pytest.raises(ValueError, match="capped"):
+        _overlay(cap_multiple_of_sponsorship=None)
+
+
+def test_a_perpetual_giveback_is_refused():
+    with pytest.raises(ValueError, match="expire"):
+        _overlay(sunset_months_after_term=None)
+
+
+def test_a_giveback_that_is_not_prorated_is_refused():
+    with pytest.raises(ValueError, match="pro-rated"):
+        _overlay(prorated_by_months_received=False)
+
+
+def test_taking_equity_is_refused_at_this_cheque_size():
+    from talent_engine.programs.policy import ProgramOverlay
+
+    base = _overlay()
+    data = {
+        "key": base.key, "name": base.name, "scoring_program": base.scoring_program,
+        "seats": base.seats, "duration_months": base.duration_months,
+        "budget_usd": base.budget_usd,
+        "benefits": [{"key": "b", "monthly_usd": 100, "months": 4}],
+        "selection": base.selection, "monitoring": base.monitoring,
+        "giveback": base.giveback,
+        "commitments_to_recipient": base.commitments_to_recipient,
+        "upside": {"equity_taken": True},
+    }
+    with pytest.raises(ValueError, match="does not take equity"):
+        ProgramOverlay.from_dict(data)
+
+
+def test_terms_must_run_both_ways():
+    """A sponsorship where only one side has obligations is not a relationship."""
+    from talent_engine.programs.policy import ProgramOverlay
+
+    base = _overlay()
+    data = {
+        "key": "t", "name": "T", "scoring_program": "p", "seats": 2,
+        "duration_months": 4, "budget_usd": 800,
+        "benefits": [{"key": "b", "monthly_usd": 100, "months": 4}],
+        "selection": base.selection, "monitoring": base.monitoring,
+        "giveback": base.giveback,
+    }
+    with pytest.raises(ValueError, match="owes the recipient"):
+        ProgramOverlay.from_dict(data)
+
+    data["commitments_to_recipient"] = {"retains_all_ip_and_equity": True}
+    with pytest.raises(ValueError, match="may_withdraw_without_penalty"):
+        ProgramOverlay.from_dict(data)
+
+
+def test_the_giveback_scales_with_what_was_actually_received():
+    """Someone who left at the month-two gate owes half, not all."""
+    o = _overlay()
+    assert o.giveback_owed_bps(0) == 0
+    assert o.giveback_owed_bps(2) == 100
+    assert o.giveback_owed_bps(4) == 200
+    assert o.giveback_owed_bps(99) == 200  # cannot exceed the full term
+
+
+def test_the_live_program_carries_the_agreed_terms():
+    from talent_engine.programs import load_overlay
+
+    o = load_overlay("prezenti-sponsorship-trial")
+    assert o.giveback_cap_usd == 14000.0
+    assert o.giveback["sunset_months_after_term"] == 36
+    assert o.giveback["enforcement"] == "reputational"
+    assert o.upside["right_of_first_offer_next_round"] is True
+    assert o.upside["equity_taken"] is False
+    assert o.commitments_to_recipient["no_exclusivity"] is True
+    assert o.commitments_to_recipient["feedback_to_unsuccessful_applicants"] is True

@@ -40,6 +40,11 @@ class ProgramOverlay:
     monitoring: dict[str, Any]
     giveback: dict[str, Any]
     kpis: dict[str, Any] = field(default_factory=dict)
+    upside: dict[str, Any] = field(default_factory=dict)
+    # What the program owes the recipient. A sponsorship where only one
+    # side carries obligations is not a relationship, and at this cheque
+    # size the relationship is the entire return.
+    commitments_to_recipient: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.seats <= 0 or self.duration_months <= 0:
@@ -71,6 +76,44 @@ class ProgramOverlay:
         if sum(int(r.get("bps", 0)) for r in recipients) != total_bps:
             raise ValueError(f"{self.key}: give-back recipient shares do not add up")
 
+        # An uncapped, perpetual give-back is disproportionate to an in-kind
+        # grant of this size, and it selects against builders who have other
+        # options — which are exactly the builders the rubric exists to find.
+        # See docs/SPONSORSHIP_TERMS.md.
+        if total_bps > 0:
+            if not self.giveback.get("cap_multiple_of_sponsorship"):
+                raise ValueError(
+                    f"{self.key}: a give-back must be capped. An open-ended claim "
+                    "from an in-kind grant is the kind of encumbrance a later "
+                    "investor asks to have removed."
+                )
+            if not self.giveback.get("sunset_months_after_term"):
+                raise ValueError(f"{self.key}: a give-back must expire")
+            if not self.giveback.get("prorated_by_months_received"):
+                raise ValueError(
+                    f"{self.key}: a give-back must be pro-rated by months actually "
+                    "received — the terms otherwise punish someone who withdrew "
+                    "honourably at the month-two gate"
+                )
+
+        # Equity is not taken at this cheque size; a right to be *offered*
+        # participation costs the builder nothing and needs no enforcement.
+        if self.upside.get("equity_taken"):
+            raise ValueError(
+                f"{self.key}: this program does not take equity. A right of first "
+                "offer is the instrument at this size."
+            )
+
+        if not self.commitments_to_recipient:
+            raise ValueError(
+                f"{self.key}: state what the program owes the recipient. Terms that "
+                "run one way are not a relationship, and the relationship is the "
+                "return here."
+            )
+        for required in ("retains_all_ip_and_equity", "may_withdraw_without_penalty"):
+            if not self.commitments_to_recipient.get(required):
+                raise ValueError(f"{self.key}: recipients must be guaranteed {required}")
+
         if abs(self.total_budget_usd - float(self.budget_usd)) > 0.01:
             raise ValueError(
                 f"{self.key}: benefit schedule totals ${self.total_budget_usd:,.2f}, "
@@ -84,6 +127,24 @@ class ProgramOverlay:
     @property
     def total_budget_usd(self) -> float:
         return round(self.per_person_usd * self.seats, 2)
+
+    @property
+    def giveback_cap_usd(self) -> float:
+        """The most any one recipient could ever owe."""
+        multiple = float(self.giveback.get("cap_multiple_of_sponsorship", 0))
+        return round(self.per_person_usd * multiple, 2)
+
+    def giveback_owed_bps(self, months_received: int) -> int:
+        """Give-back scaled to what they actually took.
+
+        Someone who left at the month-two gate owes half of what someone who
+        completed the term owes. Without this the terms are worst for the
+        person who withdrew early and honestly.
+        """
+        if not self.giveback.get("prorated_by_months_received"):
+            return int(self.giveback.get("total_bps", 0))
+        months = max(0, min(int(months_received), self.duration_months))
+        return round(int(self.giveback.get("total_bps", 0)) * months / self.duration_months)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProgramOverlay":

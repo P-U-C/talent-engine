@@ -44,6 +44,11 @@
     "total_bps": 200,
     "scope": "applicant-controlled product identified in the sponsored build plan",
     "onchain_base": "revenue actually received by the product through Celo",
+    "also_applies_to": "grant, prize and retro-funding income won with the sponsored work",
+    "cap_multiple_of_sponsorship": 10,
+    "sunset_months_after_term": 36,
+    "prorated_by_months_received": true,
+    "enforcement": "reputational",
     "recipients": [
       {
         "name": "Prezenti",
@@ -63,5 +68,20 @@
     "active_recipients_at_term_end": 4,
     "external_usage_or_revenue_products": 1,
     "report_full_recruitment_funnel": true
+  },
+  "upside": {
+    "equity_taken": false,
+    "right_of_first_offer_next_round": true,
+    "rofo_notice_days": 14,
+    "note": "A right to be offered participation, never an obligation to grant it."
+  },
+  "commitments_to_recipient": {
+    "retains_all_ip_and_equity": true,
+    "no_exclusivity": true,
+    "may_withdraw_without_penalty": true,
+    "public_record_of_backing": true,
+    "introductions_on_request": true,
+    "score_and_evidence_shared_with_applicant": true,
+    "feedback_to_unsuccessful_applicants": true
   }
 }

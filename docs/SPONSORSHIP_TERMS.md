@@ -1,5 +1,7 @@
 # What happens after someone is accepted
 
+**Status: agreed and enforced in code.** `policies/prezenti-sponsorship-trial.json` carries these terms and `ProgramOverlay` refuses to load an overlay that breaks them.
+
 Design notes on the give-back, the pledge, and 0xSplits. Not legal advice; the
 pledge form already collects governing law and dispute resolution, which means
 somebody should have a lawyer read the final wording.
@@ -125,3 +127,55 @@ lists of validating repositories, which would catch a ring whose members never
 applied — stops being optional.
 
 Decide the terms and the selection defences together, not in sequence.
+
+
+## Agreed position
+
+The framing that settled it: this is about building relationships, not about
+extracting initial monetary value. At $1,400 a head the financial claim was
+never going to be the return — the standing, the deal flow and the goodwill
+are. Terms that read as grasping cost more of that than they could ever
+recover.
+
+So the give-back stays, because reciprocity is part of the relationship, but it
+is bounded in every direction a person would reasonably worry about:
+
+| term | value | why |
+|---|---|---|
+| give-back | 200bps of Celo revenue | unchanged |
+| also applies to | grant, prize and retro-funding income | where early money actually lands, and the one category a Splits address can capture |
+| cap | 10x sponsorship — $14,000 | makes it finite and survivable in diligence |
+| sunset | 36 months after term end | it ends |
+| pro-rating | by months actually received | leaving at the month-two gate halves it |
+| enforcement | reputational | stated plainly rather than implied |
+| equity | none taken | — |
+| upside | right of first offer on the next round, 14 days' notice | costs nothing today, needs no enforcement |
+
+### What the program owes in return
+
+Terms that run one way are not a relationship, so the overlay now refuses to
+load without a `commitments_to_recipient` block, and specifically without
+guaranteeing that the recipient keeps all IP and equity and may withdraw
+without penalty. The current set:
+
+- keeps all IP and equity
+- no exclusivity
+- may withdraw without penalty
+- a public record of having been backed
+- introductions on request
+- their score and its evidence shared with them
+- feedback to unsuccessful applicants
+
+That last one costs real time and is the one most programs skip. It is also the
+one that makes the difference between an applicant who was rejected and an
+applicant who was treated with respect, and the second person tells other
+people to apply.
+
+### Enforced, not documented
+
+`ProgramOverlay.__post_init__` refuses an uncapped give-back, a give-back that
+never expires, one that is not pro-rated, any overlay that takes equity, and
+any overlay that does not say what the program owes. `giveback_owed_bps(months)`
+does the pro-rating. The reasoning lives in this document; the guarantees live
+in the code, because a policy that exists only in prose drifts the first time
+somebody is in a hurry.
