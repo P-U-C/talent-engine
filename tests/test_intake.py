@@ -455,3 +455,37 @@ def test_form_id_is_escaped_into_the_iframe_src():
 
     body = landing_page("P", '"><script>alert(1)</script>').decode()
     assert "<script>alert(1)</script>" not in body
+
+
+def test_page_copy_comes_from_the_program_config():
+    """The words published under someone's own domain are theirs to write."""
+    from talent_engine.server import landing_page
+
+    body = landing_page(
+        "P", "", {"headline": "Prezenti Builder Sponsorship", "footer": "Run by Prezenti."}
+    ).decode()
+    assert "Prezenti Builder Sponsorship" in body
+    assert "Run by Prezenti." in body
+    assert "Sponsorship for people who ship" not in body  # default replaced
+
+
+def test_page_copy_is_escaped():
+    from talent_engine.server import landing_page
+
+    body = landing_page("P", "", {"headline": "<script>alert(1)</script>"}).decode()
+    assert "<script>alert(1)</script>" not in body
+
+
+def test_program_config_carries_page_copy(tmp_path):
+    """A config with a page block round-trips and reaches the renderer."""
+    import json as _json
+
+    from talent_engine.config import ProgramConfig
+
+    path = tmp_path / "p.json"
+    path.write_text(
+        _json.dumps({"key": "p", "name": "P", "page": {"headline": "Hello"}})
+    )
+    cfg = ProgramConfig.load(path)
+    assert cfg.page["headline"] == "Hello"
+    assert ProgramConfig.from_dict(cfg.to_dict()).page["headline"] == "Hello"

@@ -120,6 +120,11 @@ class ProgramConfig:
     context_statement_enabled: bool = True
     score_free_text: bool = False  # optional pluggable LLM pass, off by default
     mode: str = "program"  # "program" | "recruitment"
+    # Copy for the public application page. Lives here rather than in the
+    # server because the words are the running organisation's to write and
+    # sign off, and they should be editable without touching Python. Unset
+    # keys fall back to the generic defaults in server/pages.py.
+    page: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         unknown = set(self.weights) - set(REFERENCE_WEIGHTS)

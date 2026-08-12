@@ -256,7 +256,11 @@ def cmd_serve(args) -> int:
         db_path=args.db,
         collector_factory=lambda: Collector(_client(args), window_days=cfg.window_days),
     )
-    pages = {} if args.no_page else routes(cfg.name, os.environ.get("TALLY_FORM_ID", ""))
+    pages = (
+        {}
+        if args.no_page
+        else routes(cfg.name, os.environ.get("TALLY_FORM_ID", ""), cfg.page)
+    )
     if pages and not os.environ.get("TALLY_FORM_ID"):
         print(
             "note: TALLY_FORM_ID is not set, so the landing page renders without "

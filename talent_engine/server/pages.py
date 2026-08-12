@@ -82,7 +82,32 @@ def _embed(form_id: str) -> str:
     )
 
 
-def landing_page(program_name: str, form_id: str) -> bytes:
+DEFAULT_COPY = {
+    "headline": "Sponsorship for people who ship",
+    "lede": (
+        "We back builders on evidence of what they have actually shipped — not "
+        "on where they studied, who they know, or how many stars a repository "
+        "has."
+    ),
+    "footer": "",
+}
+
+
+def landing_page(program_name: str, form_id: str, copy: dict[str, str] | None = None) -> bytes:
+    """Render the application page.
+
+    `copy` comes from the program config so the running organisation owns the
+    words it publishes under its own domain, and can change them without a code
+    change. Everything is escaped: the copy is trusted-ish, but it is read from
+    a file on disk and rendered into a public page, which is not a combination
+    to be casual about.
+    """
+    text = {**DEFAULT_COPY, **(copy or {})}
+    headline = html.escape(text["headline"])
+    lede = html.escape(text["lede"])
+    extra_footer = (
+        f"<p>{html.escape(text['footer'])}</p>" if text.get("footer") else ""
+    )
     program = html.escape(program_name)
     return f"""<!doctype html>
 <html lang="en">
@@ -90,17 +115,15 @@ def landing_page(program_name: str, form_id: str) -> bytes:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{program} — apply</title>
-<meta name="description" content="Sponsorship for people who ship. Scored on
-public code activity against a rubric you can read and reproduce.">
+<meta name="description" content="{headline}. Scored on public code activity
+against a rubric you can read and reproduce.">
 <style>{PAGE_CSS}</style>
 </head>
 <body>
 <div class="wrap">
 
-<h1>Sponsorship for people who ship</h1>
-<p class="lede">We back builders on evidence of what they have actually
-shipped — not on where they studied, who they know, or how many stars a
-repository has.</p>
+<h1>{headline}</h1>
+<p class="lede">{lede}</p>
 
 <h2>How you are assessed</h2>
 <p>Your public code activity is scored against a fixed rubric. Four signals
@@ -141,6 +164,7 @@ an assessment record.</p>
 {_embed(form_id)}
 
 <footer>
+{extra_footer}
 <p>Scoring engine: <a href="{REPO_URL}">P-U-C/talent-engine</a> — open source,
 including the rubric and the checks that flag manipulated profiles.</p>
 </footer>
@@ -151,10 +175,14 @@ including the rubric and the checks that flag manipulated profiles.</p>
 """.encode()
 
 
-def routes(program_name: str, form_id: str | None = None) -> dict[str, tuple[str, bytes]]:
+def routes(
+    program_name: str,
+    form_id: str | None = None,
+    copy: dict[str, str] | None = None,
+) -> dict[str, tuple[str, bytes]]:
     """Exact path -> (content type, body). Anything not in here is a 404."""
     form_id = form_id if form_id is not None else os.environ.get("TALLY_FORM_ID", "")
-    page = landing_page(program_name, form_id)
+    page = landing_page(program_name, form_id, copy)
     return {
         "/": ("text/html; charset=utf-8", page),
         "/apply": ("text/html; charset=utf-8", page),
