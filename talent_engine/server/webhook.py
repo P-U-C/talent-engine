@@ -199,6 +199,7 @@ class IntakeService:
             program=self.cfg.key,
             declared_repo=app.declared_repo,
             max_points=sum(self.cfg.weights.values()),
+            contact=self._store.contact_for(submission_id),
         )
 
     def _run_for_today(self) -> str:
@@ -233,8 +234,11 @@ def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[st
             # policy can be this tight: no scripts of our own, no other origins.
             self.send_header(
                 "Content-Security-Policy",
-                "default-src 'none'; style-src 'unsafe-inline'; "
-                "frame-src https://tally.so; form-action 'none'; base-uri 'none'",
+                # data: for the embedded brand fonts, which are inlined
+                # rather than fetched so the page makes no external request.
+                "default-src 'none'; style-src 'unsafe-inline'; font-src data:; "
+                "img-src data:; frame-src https://tally.so; form-action 'none'; "
+                "base-uri 'none'",
             )
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")

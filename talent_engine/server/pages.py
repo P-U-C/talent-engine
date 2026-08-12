@@ -8,60 +8,194 @@ defence worth having on a host that also holds credentials.
 The form itself stays on Tally, in an iframe. Nothing a member of the public
 types ever reaches this process — the only thing that arrives here is a signed
 webhook from Tally's servers after the fact.
+
+**Everything is embedded.** The page's own CSP allows no external requests, so
+the logo is inlined as SVG markup and the brand fonts as data URIs rather than
+pulled from a CDN. That costs about 90KB and buys a page that renders
+identically with no third party able to see who visited.
+
+Palette and typography are Prezenti's own, read from their stylesheet rather
+than eyeballed: dark forest #112122, cream #fef4ee, orange #eb4b24, mint
+#68a9a3, with Outfit for titles and DM Sans for text.
 """
 
 from __future__ import annotations
 
+import base64
 import html
 import os
+from functools import lru_cache
+from pathlib import Path
 
 REPO_URL = "https://github.com/P-U-C/talent-engine"
+ASSETS = Path(__file__).resolve().parent / "assets"
 
+
+@lru_cache(maxsize=8)
+def _asset_b64(name: str) -> str:
+    try:
+        return base64.b64encode((ASSETS / name).read_bytes()).decode()
+    except OSError:
+        return ""
+
+
+@lru_cache(maxsize=4)
+def _logo_svg() -> str:
+    """The logo as inline markup, so CSS can recolour it for dark mode."""
+    try:
+        raw = (ASSETS / "prezenti-logo.svg").read_text()
+    except OSError:
+        return ""
+    # Drop the XML prolog; it is invalid inside an HTML body.
+    if raw.startswith("<?xml"):
+        raw = raw.split("?>", 1)[-1]
+    # The file hardcodes its fill; let the page control it instead.
+    raw = raw.replace("fill: #112122;", "fill: currentColor;")
+    return raw.replace("<svg ", '<svg class="logo" role="img" aria-label="Prezenti" ', 1)
+
+
+def _font_face() -> str:
+    dm = _asset_b64("dmsans-400.woff2")
+    outfit = _asset_b64("outfit-500.woff2")
+    blocks = []
+    if outfit:
+        blocks.append(
+            "@font-face{font-family:'Outfit';font-style:normal;font-weight:400 700;"
+            "font-display:swap;src:url(data:font/woff2;base64," + outfit + ") format('woff2');}"
+        )
+    if dm:
+        blocks.append(
+            "@font-face{font-family:'DM Sans';font-style:normal;font-weight:400 500;"
+            "font-display:swap;src:url(data:font/woff2;base64," + dm + ") format('woff2');}"
+        )
+    return "".join(blocks)
+
+
+# Prezenti's tokens, taken from prezenti.webflow.shared.css.
 PAGE_CSS = """
 :root {
-  --ink: #14161a; --muted: #5b6470; --line: #e2e5ea;
-  --bg: #fbfbfc; --accent: #1f4fd8; --card: #ffffff;
+  --forest: #112122;
+  --cream: #fef4ee;
+  --orange: #eb4b24;
+  --orange-deep: #dc331a;
+  --peach: #f9c7af;
+  --mint: #68a9a3;
+  --mint-light: #b4dbd4;
+  --green-600: #346d6a;
+
+  --bg: var(--cream);
+  --surface: #ffffff;
+  --ink: var(--forest);
+  --muted: #515151;
+  --line: #e6ddd6;
+  --accent: var(--orange-deep);
+}
+:root:not([data-theme="light"]) {
+  color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
-    --ink: #e9ecf1; --muted: #9aa3b0; --line: #262b33;
-    --bg: #0d0f12; --accent: #7fa2ff; --card: #14171c;
+  :root:not([data-theme="light"]) {
+    --bg: #0d1718;
+    --surface: #152526;
+    --ink: #f2ece7;
+    --muted: #a9b5b4;
+    --line: #24393a;
+    --accent: #ff7a55;
+    color-scheme: dark;
   }
 }
+:root[data-theme="dark"] {
+  --bg: #0d1718;
+  --surface: #152526;
+  --ink: #f2ece7;
+  --muted: #a9b5b4;
+  --line: #24393a;
+  --accent: #ff7a55;
+  color-scheme: dark;
+}
+
 * { box-sizing: border-box; }
 body {
-  margin: 0; background: var(--bg); color: var(--ink);
-  font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 17px/1.65 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
 }
-.wrap { max-width: 46rem; margin: 0 auto; padding: 4rem 1.5rem 6rem; }
-h1 { font-size: 2.1rem; line-height: 1.2; letter-spacing: -0.02em; margin: 0 0 1rem; }
-h2 { font-size: 1.15rem; letter-spacing: -0.01em; margin: 3rem 0 0.75rem; }
-p { margin: 0 0 1rem; }
-.lede { font-size: 1.15rem; color: var(--muted); margin-bottom: 2.5rem; }
-a { color: var(--accent); }
-ul { padding-left: 1.1rem; margin: 0 0 1rem; }
-li { margin-bottom: 0.5rem; }
-.card {
-  background: var(--card); border: 1px solid var(--line);
-  border-radius: 10px; padding: 1.25rem 1.4rem; margin: 1.5rem 0;
+.wrap { max-width: 44rem; margin: 0 auto; padding: 3rem 1.5rem 5rem; }
+
+.logo { height: 2.5rem; width: auto; color: var(--ink); display: block; }
+header { margin-bottom: 3.5rem; }
+
+h1 {
+  font-family: 'Outfit', sans-serif;
+  font-size: clamp(2rem, 5.5vw, 3rem);
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+  font-weight: 600;
+  margin: 0 0 1.25rem;
 }
+h2 {
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.3rem;
+  letter-spacing: -0.015em;
+  font-weight: 600;
+  margin: 3.5rem 0 1rem;
+}
+p { margin: 0 0 1.1rem; }
+.lede { font-size: 1.2rem; color: var(--muted); margin-bottom: 2rem; max-width: 34rem; }
+
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+
+ul.signals { list-style: none; padding: 0; margin: 0 0 1.5rem; }
+ul.signals li {
+  padding: 0.9rem 0 0.9rem 1.6rem;
+  border-bottom: 1px solid var(--line);
+  position: relative;
+}
+ul.signals li:before {
+  content: "";
+  position: absolute; left: 0; top: 1.5rem;
+  width: 0.55rem; height: 0.55rem; border-radius: 50%;
+  background: var(--mint);
+}
+ul.signals strong { font-weight: 500; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 1.5rem 1.6rem;
+  margin: 1.75rem 0;
+}
+.card.accent { border-left: 3px solid var(--accent); }
+
 code {
-  font: 0.875em ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-  background: rgba(127,127,127,0.12); padding: 0.15em 0.4em; border-radius: 4px;
+  font: 0.85em ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: rgba(104,169,163,0.16);
+  padding: 0.15em 0.4em; border-radius: 4px;
 }
 pre {
-  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
-  padding: 1rem; overflow-x: auto; font-size: 0.85rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  margin: 1rem 0 0;
 }
 pre code { background: none; padding: 0; }
+
 .form-frame {
-  width: 100%; min-height: 42rem; border: 1px solid var(--line);
-  border-radius: 10px; background: var(--card);
+  width: 100%; min-height: 44rem;
+  border: 1px solid var(--line); border-radius: 14px;
+  background: var(--surface);
 }
+
 footer {
-  margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--line);
-  color: var(--muted); font-size: 0.9rem;
+  margin-top: 4rem; padding-top: 1.75rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted); font-size: 0.92rem;
 }
 """
 
@@ -105,10 +239,9 @@ def landing_page(program_name: str, form_id: str, copy: dict[str, str] | None = 
     text = {**DEFAULT_COPY, **(copy or {})}
     headline = html.escape(text["headline"])
     lede = html.escape(text["lede"])
-    extra_footer = (
-        f"<p>{html.escape(text['footer'])}</p>" if text.get("footer") else ""
-    )
+    extra_footer = f"<p>{html.escape(text['footer'])}</p>" if text.get("footer") else ""
     program = html.escape(program_name)
+
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -117,10 +250,12 @@ def landing_page(program_name: str, form_id: str, copy: dict[str, str] | None = 
 <title>{program} — apply</title>
 <meta name="description" content="{headline}. Scored on public code activity
 against a rubric you can read and reproduce.">
-<style>{PAGE_CSS}</style>
+<style>{_font_face()}{PAGE_CSS}</style>
 </head>
 <body>
 <div class="wrap">
+
+<header>{_logo_svg()}</header>
 
 <h1>{headline}</h1>
 <p class="lede">{lede}</p>
@@ -128,7 +263,7 @@ against a rubric you can read and reproduce.">
 <h2>How you are assessed</h2>
 <p>Your public code activity is scored against a fixed rubric. Four signals
 carry most of the weight:</p>
-<ul>
+<ul class="signals">
   <li><strong>Origination.</strong> You create things that did not exist.
       Forking is free; originating is not.</li>
   <li><strong>Finishing.</strong> Most side projects die around commit three.
@@ -142,16 +277,23 @@ carry most of the weight:</p>
 <p>Stars and follower counts are not scored at any weight. They measure
 access, and access is exactly what this is built to look past.</p>
 
-<div class="card">
+<div class="card accent">
 <p><strong>You can check our work.</strong> The rubric is published in full,
 along with the code that applies it. Clone it and reproduce your own score:</p>
 <pre><code>git clone {REPO_URL}
 cd talent-engine
 talent-engine score --handles YOUR_GITHUB_HANDLE</code></pre>
-<p>If a number looks wrong to you, you can show us exactly where — which is
-the point of publishing it. Every score comes with linked evidence for each
-component; a score with no evidence behind it cannot be produced.</p>
+<p style="margin-top:1rem">If a number looks wrong to you, you can show us
+exactly where — which is the point of publishing it. Every score comes with
+linked evidence for each component; a score with no evidence behind it cannot
+be produced.</p>
 </div>
+
+<h2>A score is not a decision</h2>
+<p>The automated score produces a shortlist. People decide, after reading the
+evidence and talking to you. No one is funded or refused by a number, and the
+checks that flag manipulated profiles are published alongside the rubric —
+including an honest account of what they do not yet catch.</p>
 
 <h2>What we collect</h2>
 <p>Public code activity only. Nothing about your background is inferred —
@@ -165,8 +307,8 @@ an assessment record.</p>
 
 <footer>
 {extra_footer}
-<p>Scoring engine: <a href="{REPO_URL}">P-U-C/talent-engine</a> — open source,
-including the rubric and the checks that flag manipulated profiles.</p>
+<p>Scoring engine: <a href="{REPO_URL}">talent-engine</a> — open source,
+including the rubric, the anti-gaming checks, and their known limits.</p>
 </footer>
 
 </div>

@@ -54,7 +54,13 @@
       "wallet",
       "dapp"
     ],
-    "languages": ["solidity", "vyper", "rust", "go", "typescript"]
+    "languages": [
+      "solidity",
+      "vyper",
+      "rust",
+      "go",
+      "typescript"
+    ]
   },
   "frontier": {
     "orgs": [
@@ -99,5 +105,10 @@
     "burst_commit_discount": 0.05,
     "inactivity_days": 30,
     "metric_inflation_commits_per_week": 60
+  },
+  "page": {
+    "headline": "Sponsorship for people who ship",
+    "lede": "Prezenti backs builders on evidence of what they have actually shipped — not on where they studied, who they know, or how many stars a repository has.",
+    "footer": "Run by Prezenti. Grants and sponsorships for the Celo community."
   }
 }

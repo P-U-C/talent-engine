@@ -501,3 +501,38 @@ def test_program_config_carries_page_copy(tmp_path):
     cfg = ProgramConfig.load(path)
     assert cfg.page["headline"] == "Hello"
     assert ProgramConfig.from_dict(cfg.to_dict()).page["headline"] == "Hello"
+
+
+def test_the_page_makes_no_external_request_except_the_form(live_page):
+    """CSP allows one foreign origin; brand assets must be embedded, not fetched."""
+    url, _ = live_page
+    _status, body, headers = get(url + "/")
+
+    # Fonts and logo are inline, so no CDN host appears anywhere.
+    assert "fonts.googleapis.com" not in body
+    assert "fonts.gstatic.com" not in body
+    assert "website-files.com" not in body
+    assert "data:font/woff2" in body
+    assert '<svg class="logo"' in body
+
+    csp = headers["Content-Security-Policy"]
+    assert "default-src 'none'" in csp
+    assert "font-src data:" in csp
+    # tally.so remains the only permitted external origin.
+    assert csp.count("https://") == 1
+
+
+def test_the_page_carries_prezenti_brand_tokens(live_page):
+    url, _ = live_page
+    _status, body, _headers = get(url + "/")
+    for colour in ("#112122", "#fef4ee", "#eb4b24", "#68a9a3"):
+        assert colour in body, f"brand colour {colour} missing"
+    assert "Outfit" in body and "DM Sans" in body
+
+
+def test_the_page_states_that_a_score_is_not_a_decision(live_page):
+    """The red-team result makes this claim load-bearing, not decoration."""
+    url, _ = live_page
+    _status, body, _headers = get(url + "/")
+    assert "A score is not a decision" in body
+    assert "shortlist" in body

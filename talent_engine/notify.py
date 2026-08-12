@@ -5,11 +5,19 @@ in SQLite means an applicant waits days because the operator had no reason to
 run a command that day, and a system that never speaks is indistinguishable
 from a system that has broken.
 
-**Contact details are deliberately not sent.** The notification carries the
-handle, the score, and the caveat sentence — enough to decide whether to look
-now. Reaching the person needs `submissions --with-contact`, which reads the
-quarantined table on the box. A notification is delivered to and stored by a
-third party, and invariant 7 is not worth trading for saving one command.
+Two channels, chosen by what is configured: SMTP (for an operator who reads
+mail and has no shell on this box) and Telegram. When mail is configured it is
+used, and **Telegram becomes the fallback for a failed send** rather than being
+switched off — a notification that silently goes nowhere is the failure this
+module exists to prevent, so a broken relay must degrade rather than drop.
+
+**Whether contact details travel depends on the channel, and that is a
+deliberate asymmetry.** Telegram gets the handle, score and caveat only:
+reaching someone needs `submissions --with-contact`, run on the box. Email
+carries the contact block, because the recipient is the program operator who
+cannot run that command, and the form platform already delivers the same
+details to the same mailbox — withholding them there would cost real work and
+protect nothing. Neither channel ever carries an assessment record.
 
 Unconfigured is a no-op, never an error: notification is a convenience, and a
 missing token must never cost a scored submission.
@@ -20,9 +28,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import smtplib
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
+from email.message import EmailMessage
+from email.utils import formataddr
 from pathlib import Path
 from typing import Any
 
@@ -53,8 +65,74 @@ def credentials() -> tuple[str, str]:
     return token, chat
 
 
+def mail_config() -> dict[str, str]:
+    """SMTP settings, or an empty dict when mail is not configured."""
+    host = os.environ.get("SMTP_HOST", "")
+    to = os.environ.get("NOTIFY_EMAIL_TO", "")
+    if not host or not to:
+        return {}
+    return {
+        "host": host,
+        "port": os.environ.get("SMTP_PORT", "587"),
+        "user": os.environ.get("SMTP_USER", ""),
+        "password": os.environ.get("SMTP_PASSWORD", ""),
+        "from": os.environ.get("NOTIFY_EMAIL_FROM", os.environ.get("SMTP_USER", "")),
+        "from_name": os.environ.get("NOTIFY_EMAIL_FROM_NAME", "Prezenti Sponsorships"),
+        "to": to,
+    }
+
+
+def send_email(subject: str, body: str, *, timeout: int = 30) -> bool:
+    """Send over an authenticated relay. Never raises.
+
+    Port 25 out of this host is blocked and unauthenticated mail from it would
+    be filtered anyway, so this deliberately requires a relay with credentials
+    rather than falling back to a local MTA that would silently defer forever.
+    """
+    cfg = mail_config()
+    if not cfg:
+        return False
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = formataddr((cfg["from_name"], cfg["from"]))
+    msg["To"] = cfg["to"]
+    msg.set_content(body)
+
+    try:
+        port = int(cfg["port"])
+        if port == 465:
+            server = smtplib.SMTP_SSL(cfg["host"], port, timeout=timeout,
+                                      context=ssl.create_default_context())
+        else:
+            server = smtplib.SMTP(cfg["host"], port, timeout=timeout)
+        with server:
+            if port != 465:
+                server.starttls(context=ssl.create_default_context())
+            if cfg["user"]:
+                server.login(cfg["user"], cfg["password"])
+            server.send_message(msg)
+        log.info("emailed %r to %s", subject, cfg["to"])
+        return True
+    except (smtplib.SMTPException, OSError, ValueError) as exc:
+        log.warning("email failed (%s); falling back to telegram", exc)
+        return False
+
+
+def notify(subject: str, body: str, telegram_body: str | None = None) -> bool:
+    """Deliver by mail if configured, else Telegram; Telegram on mail failure.
+
+    The fallback is the point: a notification that goes nowhere is worse than
+    the pull-only system this replaced, because it looks like nothing happened.
+    """
+    if mail_config():
+        if send_email(subject, body):
+            return True
+    return send(telegram_body if telegram_body is not None else f"{subject}\n\n{body}")
+
+
 def send(text: str, *, timeout: int = 20) -> bool:
-    """Best effort. Returns whether it went out; never raises."""
+    """Telegram. Best effort. Returns whether it went out; never raises."""
     token, chat = credentials()
     if not token or not chat:
         log.debug("no telegram credentials; notification skipped")
@@ -83,6 +161,7 @@ def application_scored(
     program: str,
     declared_repo: str = "",
     max_points: float = 100.0,
+    contact: dict[str, Any] | None = None,
 ) -> bool:
     """A new application has been scored.
 
@@ -90,20 +169,51 @@ def application_scored(
     everywhere else: this message is where the operator forms their first
     impression, and a bare score is the most misleading thing to send.
     """
-    lines = [
+    head = [
         f"New application — {handle}",
         f"{total:.1f} / {max_points:.0f}   ({program})",
     ]
     if declared_repo:
-        lines.append(f"repo: {declared_repo}")
-    lines += [
-        "",
-        caveat,
-        "",
-        f"https://github.com/{handle}",
-        "Contact details: talent-engine submissions --with-contact",
+        head.append(f"repo: {declared_repo}")
+    head += ["", caveat, "", f"https://github.com/{handle}"]
+
+    # Telegram: no contact details, they stay on the box.
+    telegram_body = "\n".join(
+        head + ["Contact details: talent-engine submissions --with-contact"]
+    )
+
+    # Email: the operator cannot run that command, and the form platform
+    # already sent them the same details.
+    email_body = "\n".join(
+        head
+        + [""]
+        + _contact_block(contact)
+        + [
+            "",
+            "This score is a shortlist position, not a decision. The rubric and "
+            "the code that applies it are public: "
+            "https://github.com/P-U-C/talent-engine",
+        ]
+    )
+    return notify(
+        subject=f"New application — {handle} ({total:.1f})",
+        body=email_body,
+        telegram_body=telegram_body,
+    )
+
+
+def _contact_block(contact: dict[str, Any] | None) -> list[str]:
+    if not contact:
+        return ["(no contact details on file)"]
+    fields = [
+        ("Name", contact.get("name")),
+        ("Email", contact.get("email")),
+        ("Telegram", contact.get("telegram")),
+        ("X", contact.get("x")),
+        ("Discord", contact.get("discord")),
     ]
-    return send("\n".join(lines))
+    present = [f"{label}: {value}" for label, value in fields if value]
+    return present or ["(no contact details on file)"]
 
 
 def scout_digest(candidates: list[dict[str, Any]], program: str, limit: int = 10) -> bool:
@@ -130,5 +240,10 @@ def scout_digest(candidates: list[dict[str, Any]], program: str, limit: int = 10
         lines.append("")
         lines.append(f"…and {len(candidates) - len(shown)} more.")
     lines.append("")
-    lines.append("These have not applied. Score one: talent-engine score --handles <handle>")
-    return send("\n".join(lines))
+    lines.append("These have not applied to anything — they were found by searching "
+                 "public activity. Reaching out is the point.")
+    body = "\n".join(lines)
+    return notify(
+        subject=f"Scout — {len(candidates)} new candidate(s), {program}",
+        body=body,
+    )
