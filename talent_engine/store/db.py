@@ -70,15 +70,61 @@ CREATE TABLE IF NOT EXISTS cohort (
     PRIMARY KEY (program, handle)
 );
 CREATE INDEX IF NOT EXISTS idx_scores_handle ON scores(handle);
+
+-- Inbound form submissions. `submission_id` is the form's own id, so a webhook
+-- redelivery is a no-op rather than a second score for the same person.
+CREATE TABLE IF NOT EXISTS submissions (
+    submission_id TEXT PRIMARY KEY,
+    program TEXT NOT NULL,
+    source TEXT NOT NULL,
+    form_id TEXT DEFAULT '',
+    handle TEXT DEFAULT '',
+    raw_handle TEXT DEFAULT '',
+    application_json TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    status TEXT NOT NULL,          -- queued | scored | unparsable | error
+    run_id TEXT DEFAULT '',
+    total REAL,
+    error TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_submissions_status ON submissions(status);
+CREATE INDEX IF NOT EXISTS idx_submissions_handle ON submissions(handle);
+
+-- Contact details live here and ONLY here: never in a snapshot, never in a
+-- score, never in a dossier. Joined to a submission by id when a human needs
+-- to reach someone, and separable from everything publishable by dropping
+-- this one table.
+CREATE TABLE IF NOT EXISTS contacts (
+    submission_id TEXT PRIMARY KEY,
+    email TEXT DEFAULT '',
+    name TEXT DEFAULT '',
+    telegram TEXT DEFAULT '',
+    x TEXT DEFAULT '',
+    discord TEXT DEFAULT '',
+    recorded_at TEXT NOT NULL
+);
 """
 
 
 class Store:
-    def __init__(self, path: str | Path = "talent_engine.db") -> None:
+    def __init__(self, path: str | Path = "talent_engine.db", *, shared: bool = False) -> None:
+        """`shared=True` permits use from more than one thread.
+
+        Only pass it when the caller serialises its own access — the HTTP
+        intake path does, under a single lock, because ThreadingHTTPServer
+        hands every request to a fresh thread and sqlite3 otherwise binds a
+        connection to whichever thread opened it.
+        """
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.path))
+        self.conn = sqlite3.connect(str(self.path), check_same_thread=not shared)
         self.conn.row_factory = sqlite3.Row
+        # Intake and scoring hold separate connections to the same file, so a
+        # writer must not lock the other out: WAL lets them overlap, and the
+        # busy timeout turns the remaining contention into a wait instead of an
+        # immediate "database is locked" that would drop a submission.
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA busy_timeout=5000")
         self.conn.executescript(SCHEMA)
         self.conn.commit()
 
@@ -226,6 +272,107 @@ class Store:
             "SELECT * FROM cohort WHERE program = ? ORDER BY handle", (program,)
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------ submissions
+
+    def record_submission(
+        self,
+        submission_id: str,
+        program: str,
+        source: str,
+        handle: str,
+        raw_handle: str,
+        application: Application,
+        form_id: str = "",
+        status: str = "queued",
+    ) -> bool:
+        """Insert a submission. Returns False if this id was already seen.
+
+        Idempotency is the point: form platforms retry webhooks on any non-2xx
+        and sometimes on a slow 2xx, and a retry must not produce a second
+        score, a second API spend, or a duplicate row in the ranking.
+        """
+        cur = self.conn.execute(
+            "INSERT OR IGNORE INTO submissions (submission_id, program, source, form_id, "
+            "handle, raw_handle, application_json, received_at, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                submission_id,
+                program,
+                source,
+                form_id,
+                handle,
+                raw_handle,
+                json.dumps(asdict(application), sort_keys=True),
+                utc_now_iso(),
+                status,
+            ),
+        )
+        self.conn.commit()
+        return cur.rowcount == 1
+
+    def record_contact(self, submission_id: str, contact: Any) -> None:
+        """Store contact details in the quarantined table.
+
+        Takes the dataclass rather than a dict so a caller cannot casually pass
+        the whole form payload in here.
+        """
+        self.conn.execute(
+            "INSERT OR REPLACE INTO contacts (submission_id, email, name, telegram, x, "
+            "discord, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                submission_id,
+                getattr(contact, "email", ""),
+                getattr(contact, "name", ""),
+                getattr(contact, "telegram", ""),
+                getattr(contact, "x", ""),
+                getattr(contact, "discord", ""),
+                utc_now_iso(),
+            ),
+        )
+        self.conn.commit()
+
+    def finish_submission(
+        self, submission_id: str, status: str, run_id: str = "", total: float | None = None,
+        error: str = "",
+    ) -> None:
+        self.conn.execute(
+            "UPDATE submissions SET status = ?, run_id = ?, total = ?, error = ? "
+            "WHERE submission_id = ?",
+            (status, run_id, total, error[:500], submission_id),
+        )
+        self.conn.commit()
+
+    def pending_submissions(self, program: str | None = None) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM submissions WHERE status = 'queued'"
+        params: list[Any] = []
+        if program:
+            sql += " AND program = ?"
+            params.append(program)
+        sql += " ORDER BY received_at"
+        return [dict(r) for r in self.conn.execute(sql, params).fetchall()]
+
+    def submissions(self, program: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM submissions"
+        params: list[Any] = []
+        if program:
+            sql += " WHERE program = ?"
+            params.append(program)
+        sql += " ORDER BY received_at DESC LIMIT ?"
+        params.append(limit)
+        return [dict(r) for r in self.conn.execute(sql, params).fetchall()]
+
+    def get_submission(self, submission_id: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM submissions WHERE submission_id = ?", (submission_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def contact_for(self, submission_id: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM contacts WHERE submission_id = ?", (submission_id,)
+        ).fetchone()
+        return dict(row) if row else None
 
     def close(self) -> None:
         self.conn.close()

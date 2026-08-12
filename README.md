@@ -48,6 +48,37 @@ talent-engine measure --program celo-trial --baseline run_a --endline run_b
 talent-engine verify --run run_a --handle octocat
 ```
 
+### Form intake
+
+`serve` receives form webhooks and scores each submission as it arrives, so an
+applicant is ranked without anyone exporting a CSV.
+
+```bash
+export TALLY_SIGNING_SECRET=...   # from the form's webhook settings; required
+talent-engine serve --program celo-trial --host 0.0.0.0 --port 8787
+#   POST /webhook/tally    signed submissions in
+#   GET  /healthz
+
+talent-engine submissions --program celo-trial                  # what came in
+talent-engine submissions --program celo-trial --with-contact   # + how to reach them
+```
+
+Three properties worth knowing, because each replaces a failure that is hard to
+see once it has happened:
+
+- **Signature verification is mandatory.** There is no unauthenticated mode:
+  an open scoring endpoint is an open GitHub-API spend and an open way to push
+  applicants into a ranking.
+- **The request path does no network work.** Scoring an applicant takes tens of
+  seconds of GitHub calls; form platforms time out in a few and retry on
+  anything non-2xx. Submissions are committed to SQLite, then scored on a
+  worker thread, and a restart requeues anything still pending.
+- **Redelivery is a no-op.** Idempotency is keyed on the form's own submission
+  id, so a retried webhook does not score a person twice.
+
+Contact details are stored in their own table and never enter a snapshot, a
+score, or a dossier — see invariant 7.
+
 ## Design invariants
 
 These are enforced in code, not asserted in documentation:
@@ -65,6 +96,11 @@ These are enforced in code, not asserted in documentation:
    `discount` is clamped to [0,1]: it can shrink a component, never grow one.
 5. **Public data only.**
 6. **One instrument.** Scout, score, monitor and measure share one rubric.
+7. **Contact details are quarantined.** A form asks for an email; an evidence
+   dossier is an artefact you hand to third parties. Form intake returns
+   contact fields as a separate record written to a separate table, and strips
+   anything address-shaped from the application — so the publishable half of
+   the system is separable from the identifying half by dropping one table.
 
 ## Architecture
 
@@ -85,6 +121,8 @@ talent_engine/
     monitor.py       cohort status + before/after measurement
   store/db.py        persistence + audit log + replay
   ingest/normalize.py CSV ingest, handle normalisation
+  ingest/tally.py    form webhooks -> Application + quarantined Contact
+  server/webhook.py  signed intake endpoint, scoring worker, idempotency
   report.py          ranked tables, CSV/JSON export, evidence dossiers
 ```
 

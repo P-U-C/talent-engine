@@ -226,6 +226,62 @@ def cmd_runs(args) -> int:
     return 0
 
 
+# -------------------------------------------------------------------- serve
+
+
+def cmd_serve(args) -> int:
+    import logging
+
+    from .server import IntakeService, run_server
+
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s: %(message)s"
+    )
+
+    secret = os.environ.get("TALLY_SIGNING_SECRET", "")
+    if not secret:
+        print(
+            "TALLY_SIGNING_SECRET is not set.\n"
+            "Take it from the Tally form's webhook settings and export it — the\n"
+            "endpoint refuses to start without it, because an unauthenticated\n"
+            "scoring endpoint is an open GitHub-API spend and lets anyone push\n"
+            "applicants into the ranking.",
+            file=sys.stderr,
+        )
+        return 2
+
+    cfg = load_program(args.program)
+    service = IntakeService(
+        cfg=cfg,
+        db_path=args.db,
+        collector_factory=lambda: Collector(_client(args), window_days=cfg.window_days),
+    )
+    run_server(service, secret, args.host, args.port)
+    return 0
+
+
+def cmd_submissions(args) -> int:
+    store = Store(args.db)
+    rows = store.submissions(args.program, limit=args.limit)
+    if args.with_contact:
+        # Opt-in, and never part of the default view: this is the one command
+        # that reads the quarantined contacts table.
+        for r in rows:
+            c = store.contact_for(r["submission_id"]) or {}
+            total = "" if r["total"] is None else f"{r['total']:.2f}"
+            print(
+                f"{r['received_at']}  {r['status']:<10} {r['handle']:<20} {total:>6}  "
+                f"{c.get('email', '')} {c.get('telegram', '')} {c.get('x', '')}".rstrip()
+            )
+    else:
+        for r in rows:
+            total = "" if r["total"] is None else f"{r['total']:.2f}"
+            note = r["error"] or r["run_id"]
+            print(f"{r['received_at']}  {r['status']:<10} {r['handle']:<20} {total:>6}  {note}")
+    store.close()
+    return 0
+
+
 # -------------------------------------------------------------------- main
 
 
@@ -278,6 +334,22 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("runs")
     s.add_argument("--program")
     s.set_defaults(func=cmd_runs)
+
+    s = sub.add_parser("serve", help="receive form webhooks and score submissions")
+    s.add_argument("--program", required=True)
+    s.add_argument("--host", default="127.0.0.1")
+    s.add_argument("--port", type=int, default=8787)
+    s.set_defaults(func=cmd_serve)
+
+    s = sub.add_parser("submissions", help="what has come in through the form")
+    s.add_argument("--program")
+    s.add_argument("--limit", type=int, default=100)
+    s.add_argument(
+        "--with-contact",
+        action="store_true",
+        help="include contact details (reads the quarantined contacts table)",
+    )
+    s.set_defaults(func=cmd_submissions)
 
     return p
 
