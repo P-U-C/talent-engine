@@ -45,6 +45,36 @@ class RateLimitState:
     reset_at: int | None = None
     limit: int | None = None
 
+    def reserve_for(self, configured: int) -> int:
+        """How many calls to hold back in this bucket.
+
+        A fixed reserve cannot be applied to buckets of wildly different sizes.
+        Search allows 30 requests per minute against core's 5,000 per hour, so
+        a reserve of 50 is unsatisfiable there: `remaining` is at most 29 the
+        moment the bucket is touched, the pacer concludes it is inside the
+        reserve, and it sleeps to the reset before every subsequent request.
+        Never hold back more than a tenth of what the bucket allows.
+        """
+        if not self.limit:
+            return configured
+        return max(1, min(configured, self.limit // 10))
+
+
+def bucket_for(url: str) -> str:
+    """Which rate-limit pool a URL draws from.
+
+    GitHub meters search separately from everything else, and the two limits
+    differ by two orders of magnitude. Tracking one counter for both means a
+    search response overwrites the core budget and vice versa, so the pacer is
+    reasoning about the wrong pool half the time.
+    """
+    path = urllib.parse.urlsplit(url).path
+    if path.startswith("/search/"):
+        return "search"
+    if path.startswith("/graphql"):
+        return "graphql"
+    return "core"
+
 
 class ResponseCache:
     """SQLite-backed ETag cache. Survives between runs; that is the point."""
@@ -99,7 +129,11 @@ class GitHubClient:
     spent: int = 0
     served_from_cache: int = 0
     rate: RateLimitState = field(default_factory=RateLimitState)
+    rates: dict[str, RateLimitState] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+
+    def rate_for(self, url: str) -> RateLimitState:
+        return self.rates.setdefault(bucket_for(url), RateLimitState())
 
     # ------------------------------------------------------------------ core
 
@@ -114,7 +148,7 @@ class GitHubClient:
             raise BudgetExhausted(
                 f"request budget of {self.budget} exhausted at {url}"
             )
-        self._pace()
+        self._pace(url)
 
         headers = {
             "Accept": "application/vnd.github+json",
@@ -133,14 +167,14 @@ class GitHubClient:
             try:
                 with urllib.request.urlopen(req, timeout=30) as resp:
                     self.spent += 1
-                    self._record_limits(resp.headers)
+                    self._record_limits(resp.headers, url)
                     payload = json.loads(resp.read().decode() or "null")
                     if self.cache:
                         self.cache.put(url, resp.headers.get("ETag"), payload)
                     return payload
 
             except urllib.error.HTTPError as exc:
-                self._record_limits(exc.headers)
+                self._record_limits(exc.headers, url)
                 if exc.code == 304:
                     # Unchanged since last run: free, and the whole reason the
                     # cache exists.
@@ -183,7 +217,7 @@ class GitHubClient:
 
     # ------------------------------------------------------------- internals
 
-    def _record_limits(self, headers) -> None:
+    def _record_limits(self, headers, url: str) -> None:
         def as_int(name: str) -> int | None:
             raw = headers.get(name)
             try:
@@ -191,9 +225,13 @@ class GitHubClient:
             except ValueError:
                 return None
 
-        self.rate.remaining = as_int("X-RateLimit-Remaining")
-        self.rate.reset_at = as_int("X-RateLimit-Reset")
-        self.rate.limit = as_int("X-RateLimit-Limit")
+        state = self.rate_for(url)
+        state.remaining = as_int("X-RateLimit-Remaining")
+        state.reset_at = as_int("X-RateLimit-Reset")
+        state.limit = as_int("X-RateLimit-Limit")
+        # `self.rate` stays as the most recent response's figures so existing
+        # callers and `stats` keep working; pacing reads the per-bucket state.
+        self.rate = state
 
     @staticmethod
     def _is_rate_limited(headers) -> bool:
@@ -220,16 +258,18 @@ class GitHubClient:
             return True
         return False
 
-    def _pace(self) -> None:
-        """Sleep to the reset if we are inside the reserve."""
-        if self.rate.remaining is None or self.rate.reset_at is None:
+    def _pace(self, url: str) -> None:
+        """Sleep to the reset if this URL's own bucket is inside its reserve."""
+        state = self.rate_for(url)
+        if state.remaining is None or state.reset_at is None:
             return
-        if self.rate.remaining > self.reserve:
+        reserve = state.reserve_for(self.reserve)
+        if state.remaining > reserve:
             return
-        delay = max(0, self.rate.reset_at - int(time.time())) + 1
+        delay = max(0, state.reset_at - int(time.time())) + 1
         if delay > 0:
             self.notes.append(
-                f"paced: {self.rate.remaining} calls left, slept {delay}s"
+                f"paced {bucket_for(url)}: {state.remaining} calls left, slept {delay}s"
             )
             self.sleep_fn(min(delay, 3600))
 
@@ -239,6 +279,6 @@ class GitHubClient:
             "requests_spent": self.spent,
             "served_from_cache_304": self.served_from_cache,
             "budget": self.budget,
-            "rate_remaining": self.rate.remaining,
+            "rate_remaining": {k: v.remaining for k, v in sorted(self.rates.items())},
             "auth": self.auth.label,
         }
