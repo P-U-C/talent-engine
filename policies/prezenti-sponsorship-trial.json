@@ -1,0 +1,67 @@
+{
+  "key": "prezenti-sponsorship-trial",
+  "name": "Prezenti AI Builder Sponsorships (Trial)",
+  "scoring_program": "prezenti-sponsorship-trial",
+  "seats": 5,
+  "duration_months": 4,
+  "budget_usd": 7000,
+  "benefits": [
+    {
+      "key": "claude_max_20x",
+      "monthly_usd": 200,
+      "months": 4
+    },
+    {
+      "key": "chatgpt_pro",
+      "monthly_usd": 100,
+      "months": 4
+    },
+    {
+      "key": "flexible_allowance",
+      "one_time_usd": 200
+    }
+  ],
+  "selection": {
+    "shortlist_multiplier": 3,
+    "automated_final_selection": false,
+    "human_verification_required": true,
+    "access_gate_required": true,
+    "build_plan_required": true,
+    "celo_fit_required": true,
+    "regional_scout_endorsement_is_context_only": true,
+    "publish_selected_dossiers_with_consent": true
+  },
+  "monitoring": {
+    "monthly_public_update_required": true,
+    "inactivity_review_days": 30,
+    "cure_days": 7,
+    "month_two_celo_gate": true,
+    "metric_flag_automatically_terminates": false,
+    "confirmed_material_misrepresentation_may_terminate": true
+  },
+  "giveback": {
+    "good_faith_pledge": true,
+    "total_bps": 200,
+    "scope": "applicant-controlled product identified in the sponsored build plan",
+    "onchain_base": "revenue actually received by the product through Celo",
+    "recipients": [
+      {
+        "name": "Prezenti",
+        "address_env": "PREZENTI_GIVEBACK_ADDRESS",
+        "bps": 100
+      },
+      {
+        "name": "Celo Community Fund",
+        "address_env": "CELO_COMMUNITY_FUND_ADDRESS",
+        "bps": 100
+      }
+    ]
+  },
+  "kpis": {
+    "celo_deployments_or_material_contributions": 3,
+    "monthly_update_compliance_percent": 90,
+    "active_recipients_at_term_end": 4,
+    "external_usage_or_revenue_products": 1,
+    "report_full_recruitment_funnel": true
+  }
+}
