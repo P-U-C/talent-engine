@@ -218,11 +218,10 @@ None of these are scoring-curve tweaks; two are collection changes:
 1. **Independence of the validating repository.** Count a merged PR as external
    validation only when the receiving repository shows independence — other
    contributors, meaningful age before the PR, or contributors with no other
-   overlap with the applicant. Requires collecting contributor lists.
-2. **Overlap detection across applicants.** A ring is visible in aggregate even
-   when each member looks clean alone: shared repositories, mutual PRs,
-   accounts created together. This is a batch check across the applicant pool,
-   not a per-profile one, and it is the single highest-value addition.
+   overlap with the applicant. Requires collecting contributor lists. *Still
+   outstanding.*
+2. **Overlap detection across applicants.** ✅ **Built** — see
+   `talent_engine/modes/rings.py` and the section below.
 3. **Substance behind finishing metadata.** A release with no assets, a
    homepage that does not resolve, a licence added in the same commit as the
    description — all cheap to check, all currently unchecked.
@@ -239,3 +238,55 @@ The honest statement of the current position: this engine measures public
 evidence of shipping well, and resists lazy manipulation. It does not yet
 resist a patient adversary, and it should not be the sole input to a funding
 decision until items 1 and 2 exist.
+
+
+## Cross-applicant overlap, and why the false positive governs the design
+
+The pool-level check is built. It reads stored snapshots only, so it costs no
+API calls and runs on every application rather than being a periodic chore.
+
+The easy half is finding clusters: build edges where one applicant merged a
+pull request into another's repository, reviewed one, or pushed to the same
+repository, then take connected components. The hard half is that **real
+communities produce identical edges.** Two builders in the same city who review
+each other's work look exactly like two accounts one person controls.
+
+The costs are not symmetric. Missing a ring loses money. Telling a group of
+genuine collaborators they look like a sockpuppet ring attaches an accusation
+of fraud to a funding decision, and the engine cannot tell the two apart from
+structure alone. So clustering is not the signal.
+
+The signal is **insularity**: what share of a person's merged work went to
+their own cluster or to accounts the program does not recognise, rather than to
+projects whose review bar means something independently. A real community has
+edges pointing outward; a ring, by construction, mostly does not.
+
+Measured on the fixtures:
+
+| pool | clusters | insularity | flagged |
+|---|---|---|---|
+| `sockpuppet_pool` (4 accounts, one operator) | yes | 1.00 | **review** |
+| `sockpuppet_pool` minus one member | yes | 1.00 | **review** |
+| `genuine_pool` (3 real collaborators) | yes | 0.29 | no |
+
+Both cluster. Only one is flagged.
+
+### The hole the first version had
+
+The obvious metric — share of validation staying inside the cluster — broke
+the first time a *partially applied* ring was tested. With three of four
+accounts scored, each member's edge to the absent fourth counted as outside
+validation and the group fell under the threshold. A check a ring defeats by
+withholding one account is not a check. Hence the current definition, where an
+unrecognised account is not independent evidence whether or not it has applied.
+
+### What it still cannot see
+
+A ring whose members have **not applied** is invisible: this reads the pool, and
+someone who never submitted the form is not in it. Contributor lists of the
+receiving repositories would catch that case, and are the outstanding item
+above.
+
+The output is deliberately written as an observation rather than a verdict, and
+`needs_review` never rejects anybody — the program overlay already forbids an
+automated signal from making a funding decision.

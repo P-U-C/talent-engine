@@ -33,6 +33,7 @@ from ..config import ProgramConfig
 from ..github.collector import Collector
 from ..ingest.tally import Submission, TallyPayloadError, parse_webhook, verify_signature
 from ..model import Application, utc_now_iso
+from ..modes.rings import find_clusters
 from ..notify import application_scored
 from ..scoring.concerns import concerns
 from ..scoring.engine import CODE_VERSION, score_snapshot
@@ -185,6 +186,13 @@ class IntakeService:
         score = score_snapshot(snap, self.cfg)
         self._store.save_score(run_id, score)
         caveat = concerns(score, self.cfg, snap)
+
+        # The pool-level check, run on arrival rather than on demand. It costs
+        # no API calls (it reads stored snapshots), and a ring is most useful
+        # to know about while the person is still an applicant.
+        ring_note = self._ring_note(row["handle"])
+        if ring_note:
+            caveat = f"{caveat} {ring_note}"
         self._store.finish_submission(
             submission_id, "scored", run_id=run_id, total=score.total, concerns=caveat
         )
@@ -201,6 +209,20 @@ class IntakeService:
             max_points=sum(self.cfg.weights.values()),
             contact=self._store.contact_for(submission_id),
         )
+
+    def _ring_note(self, handle: str) -> str:
+        """One line if this applicant sits in an inward-facing cluster."""
+        assert self._store is not None
+        try:
+            snapshots = self._store.latest_snapshots(self.cfg.key)
+        except Exception:
+            log.exception("ring check failed; continuing without it")
+            return ""
+        known = set(self.cfg.ecosystem.orgs) | set(self.cfg.frontier.orgs)
+        for cluster in find_clusters(snapshots, known):
+            if handle in cluster.members and cluster.needs_review:
+                return cluster.summary()
+        return ""
 
     def _run_for_today(self) -> str:
         """One run per UTC day, so a rolling intake still groups into cohorts.

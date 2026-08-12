@@ -450,3 +450,101 @@ def sockpuppet_ring() -> ProfileSnapshot:
         active_weeks=base.active_weeks,
         application=base.application,
     )
+
+
+# ---------------------------------------------------------------------------
+# Pools, for the cross-applicant check.
+#
+# The single-profile fixtures cannot exercise ring detection: it is a question
+# about a group. These build two groups with deliberately similar shapes — both
+# cluster, both review each other — differing only in whether anyone outside
+# the group has ever accepted their work.
+# ---------------------------------------------------------------------------
+
+
+def _member(handle: str, merged: list[tuple[str, int]], reviews: list[tuple[str, int]],
+            created: str) -> ProfileSnapshot:
+    repos = [
+        RepoActivity(
+            name=f"{handle}/{name}",
+            owner=handle,
+            is_fork=False,
+            pushed_at=_iso(2026, 7, 20),
+            created_at=_iso(2026, 2, 15),
+            description=f"{name} project",
+            language="TypeScript",
+            topics=["celo", "web3"],
+            has_releases=True,
+            has_description=True,
+            license="MIT",
+            commits_in_window=40,
+        )
+        for name in ("sdk", "tools")
+    ]
+    return ProfileSnapshot(
+        handle=handle,
+        account_created_at=created,
+        collected_at=WINDOW_END,
+        window_start=WINDOW_START,
+        window_end=WINDOW_END,
+        repos=repos,
+        merged_prs=[
+            PullRequestActivity(repo=r, number=n, title="patch",
+                                merged_at=_iso(2026, 5, 10), created_at=_iso(2026, 5, 1))
+            for r, n in merged
+        ],
+        reviews=[
+            ReviewActivity(repo=r, number=n, submitted_at=_iso(2026, 5, 12))
+            for r, n in reviews
+        ],
+        active_weeks=_weeks_spread(18),
+        application=Application(declared_repo=f"{handle}/sdk"),
+    )
+
+
+def sockpuppet_pool() -> dict[str, ProfileSnapshot]:
+    """Four accounts, one operator. Every merged PR lands inside the group.
+
+    This is what a ring looks like once its members all apply — which they
+    will, because several applications are several chances at a limited number
+    of seats.
+    """
+    ring = ["ring-a", "ring-b", "ring-c", "ring-d"]
+    pool = {}
+    for i, h in enumerate(ring):
+        others = [o for o in ring if o != h]
+        pool[h] = _member(
+            h,
+            merged=[(f"{others[0]}/sdk", 10 + i), (f"{others[1]}/tools", 20 + i)],
+            reviews=[(f"{others[2]}/sdk", 30 + i)],
+            # Accounts stood up in the same week.
+            created=_iso(2024, 6, 3 + i),
+        )
+    return pool
+
+
+def genuine_pool() -> dict[str, ProfileSnapshot]:
+    """Three real builders who know each other — the false positive to avoid.
+
+    They review each other's work, exactly like the ring does. The difference
+    is that most of what they have merged went to projects nobody in the group
+    controls, and their accounts are years apart.
+    """
+    people = ["ada-builds", "kwame-dev", "lin-eth"]
+    outside = [
+        ("celo-org/celo-composer", 401),
+        ("mento-protocol/mento-sdk", 88),
+        ("modelcontextprotocol/servers", 1301),
+        ("ethereum-optimism/optimism", 770),
+    ]
+    pool = {}
+    for i, h in enumerate(people):
+        peer = people[(i + 1) % len(people)]
+        pool[h] = _member(
+            h,
+            # One PR to a peer, four to unrelated ecosystem projects.
+            merged=[(f"{peer}/sdk", 50 + i)] + [(r, n + i) for r, n in outside],
+            reviews=[(f"{peer}/tools", 60 + i), ("celo-org/celo-composer", 402 + i)],
+            created=_iso(2019 + i * 2, 3, 11),
+        )
+    return pool

@@ -219,6 +219,28 @@ def cmd_dossier(args) -> int:
     return 0
 
 
+def cmd_rings(args) -> int:
+    from .modes.rings import find_clusters, report
+
+    cfg = load_program(args.program)
+    store = Store(args.db)
+    snapshots = store.latest_snapshots(cfg.key)
+    store.close()
+
+    if not snapshots:
+        print(f"no scored applicants for {cfg.key} yet", file=sys.stderr)
+        return 2
+
+    known = set(cfg.ecosystem.orgs) | set(cfg.frontier.orgs)
+    clusters = find_clusters(snapshots, known)
+    if args.format == "json":
+        print(json.dumps([c.to_dict() for c in clusters], indent=2))
+    else:
+        print(f"{len(snapshots)} scored applicants in the pool\n")
+        print(report(clusters))
+    return 0
+
+
 def cmd_runs(args) -> int:
     store = Store(args.db)
     for r in store.list_runs(args.program):
@@ -351,6 +373,13 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("runs")
     s.add_argument("--program")
     s.set_defaults(func=cmd_runs)
+
+    s = sub.add_parser(
+        "rings", help="relationships between applicants (needs a pool, not one profile)"
+    )
+    s.add_argument("--program", required=True)
+    s.add_argument("--format", choices=["table", "json"], default="table")
+    s.set_defaults(func=cmd_rings)
 
     s = sub.add_parser("serve", help="receive form webhooks and score submissions")
     s.add_argument("--program", required=True)

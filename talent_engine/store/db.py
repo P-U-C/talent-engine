@@ -375,6 +375,29 @@ class Store:
         ).fetchone()
         return dict(row) if row else None
 
+    def latest_snapshots(self, program: str) -> dict[str, ProfileSnapshot]:
+        """Most recent snapshot per handle across every run of a program.
+
+        Ring detection is a question about the applicant *pool*, not about any
+        single run, so it reads across runs — someone who applied in March and
+        someone who applied in August can still be the same person.
+        """
+        rows = self.conn.execute(
+            "SELECT s.handle, s.snapshot_digest, s.scored_at FROM scores s "
+            "JOIN runs r ON r.run_id = s.run_id WHERE r.program = ? "
+            "ORDER BY s.scored_at",
+            (program,),
+        ).fetchall()
+        latest: dict[str, str] = {}
+        for row in rows:
+            latest[row["handle"]] = row["snapshot_digest"]  # later rows win
+        out: dict[str, ProfileSnapshot] = {}
+        for handle, digest in latest.items():
+            snap = self.load_snapshot(digest)
+            if snap is not None:
+                out[handle] = snap
+        return out
+
     def contact_for(self, submission_id: str) -> dict[str, Any] | None:
         row = self.conn.execute(
             "SELECT * FROM contacts WHERE submission_id = ?", (submission_id,)
