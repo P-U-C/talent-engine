@@ -1,0 +1,236 @@
+"""Build a ProfileSnapshot from the GitHub REST API.
+
+All network access in the scoring path lives here.  The output is a plain
+serialisable record, so a score can always be regenerated later without
+touching the network.
+
+Honesty rule: whenever collection is truncated -- budget ceiling, API window,
+pagination cap -- the snapshot is marked `partial` and the reason is recorded.
+A partial collection must never be indistinguishable from a genuinely quiet
+candidate, because the two have opposite meanings and only one of them is the
+candidate's fault.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from ..model import (
+    Application,
+    ProfileSnapshot,
+    PullRequestActivity,
+    RepoActivity,
+    ReviewActivity,
+    dedupe_weeks,
+    iso_week,
+    utc_now_iso,
+)
+from .client import BudgetExhausted, GitHubClient
+
+# How many of a person's original repos get commit-level inspection. Each one
+# costs at least one request. Sampling only the newest few systematically
+# undercounts people whose main project is older than their side projects.
+DEFAULT_REPO_SAMPLE = 12
+MAX_COMMIT_PAGES = 3  # 300 commits per repo is far past the saturation point
+
+
+class Collector:
+    def __init__(
+        self,
+        client: GitHubClient,
+        *,
+        window_days: int = 183,
+        repo_sample: int = DEFAULT_REPO_SAMPLE,
+        now: datetime | None = None,
+    ) -> None:
+        self.client = client
+        self.window_days = window_days
+        self.repo_sample = repo_sample
+        self.now = now or datetime.now(timezone.utc)
+
+    @property
+    def window_start(self) -> datetime:
+        return self.now - timedelta(days=self.window_days)
+
+    def collect(self, handle: str, application: Application | None = None) -> ProfileSnapshot:
+        since = self.window_start
+        snap = ProfileSnapshot(
+            handle=handle,
+            account_created_at=None,
+            collected_at=utc_now_iso(),
+            window_start=since.isoformat(),
+            window_end=self.now.isoformat(),
+            application=application or Application(),
+        )
+
+        try:
+            self._collect_user(snap)
+            self._collect_repos(snap, since)
+            self._collect_merged_prs(snap, since)
+            self._collect_reviews(snap, since)
+        except BudgetExhausted as exc:
+            snap.partial = True
+            snap.collection_notes.append(f"request budget exhausted: {exc}")
+
+        # Cadence is the union of every source, not the sum. A push and a merged
+        # PR in the same week are one week of activity, not two.
+        snap.active_weeks = dedupe_weeks(
+            [w for r in snap.repos for w in r.commit_weeks]
+            + [iso_week(pr.merged_at) for pr in snap.merged_prs]
+            + [iso_week(rv.submitted_at) for rv in snap.reviews]
+        )
+        snap.collection_notes.append(
+            f"client: {self.client.stats['requests_spent']} requests, "
+            f"{self.client.stats['served_from_cache_304']} served from cache"
+        )
+        return snap
+
+    # ----------------------------------------------------------------- parts
+
+    def _collect_user(self, snap: ProfileSnapshot) -> None:
+        user = self.client.get(f"/users/{snap.handle}")
+        if not user:
+            snap.partial = True
+            snap.collection_notes.append("user not found or not visible")
+            return
+        snap.account_created_at = user.get("created_at")
+
+    def _collect_repos(self, snap: ProfileSnapshot, since: datetime) -> None:
+        repos: list[RepoActivity] = []
+        for raw in self.client.paginate(
+            f"/users/{snap.handle}/repos",
+            {"sort": "pushed", "direction": "desc", "type": "owner"},
+            max_pages=3,
+        ):
+            pushed = _parse(raw.get("pushed_at"))
+            repo = RepoActivity(
+                name=raw.get("full_name", ""),
+                owner=(raw.get("owner") or {}).get("login", ""),
+                is_fork=bool(raw.get("fork")),
+                pushed_at=raw.get("pushed_at"),
+                created_at=raw.get("created_at"),
+                description=raw.get("description") or "",
+                language=raw.get("language"),
+                topics=raw.get("topics") or [],
+                stars=raw.get("stargazers_count", 0),
+                has_description=bool(raw.get("description")),
+                has_pages=bool(raw.get("has_pages")),
+                homepage=raw.get("homepage") or "",
+                license=((raw.get("license") or {}) or {}).get("spdx_id"),
+            )
+            repos.append(repo)
+            # Repos are returned newest-push-first, so once we are behind the
+            # window everything after is older too.
+            if pushed and pushed < since:
+                break
+
+        in_window = [
+            r
+            for r in repos
+            if not r.is_fork and _parse(r.pushed_at) and _parse(r.pushed_at) >= since
+        ]
+        sample = in_window[: self.repo_sample]
+        if len(in_window) > len(sample):
+            snap.partial = True
+            snap.collection_notes.append(
+                f"commit inspection sampled {len(sample)} of {len(in_window)} "
+                "in-window original repos"
+            )
+
+        for repo in sample:
+            self._collect_commits(snap, repo, since)
+            if repo.has_description or repo.topics:
+                pass
+            repo.has_releases = self._has_releases(repo.name)
+
+        snap.repos = repos
+
+    def _collect_commits(
+        self, snap: ProfileSnapshot, repo: RepoActivity, since: datetime
+    ) -> None:
+        weeks: list[str] = []
+        count = 0
+        for raw in self.client.paginate(
+            f"/repos/{repo.name}/commits",
+            {"author": snap.handle, "since": since.isoformat()},
+            max_pages=MAX_COMMIT_PAGES,
+        ):
+            count += 1
+            date = (
+                ((raw.get("commit") or {}).get("author") or {}).get("date")
+                or ((raw.get("commit") or {}).get("committer") or {}).get("date")
+            )
+            wk = iso_week(date)
+            if wk:
+                weeks.append(wk)
+        repo.commits_in_window = count
+        repo.commit_weeks = sorted(set(weeks))
+
+    def _has_releases(self, full_name: str) -> bool:
+        releases = self.client.get(f"/repos/{full_name}/releases", {"per_page": 1})
+        return bool(releases)
+
+    def _collect_merged_prs(self, snap: ProfileSnapshot, since: datetime) -> None:
+        query = (
+            f"is:pr author:{snap.handle} is:merged "
+            f"merged:>={since.date().isoformat()}"
+        )
+        for raw in self.client.paginate(
+            "/search/issues", {"q": query, "sort": "updated"}, max_pages=2
+        ):
+            repo = _repo_from_issue_url(raw.get("repository_url", ""))
+            if not repo:
+                continue
+            snap.merged_prs.append(
+                PullRequestActivity(
+                    repo=repo,
+                    number=raw.get("number", 0),
+                    title=raw.get("title", "")[:200],
+                    merged_at=(raw.get("pull_request") or {}).get("merged_at")
+                    or raw.get("closed_at"),
+                    created_at=raw.get("created_at"),
+                    is_own_repo=repo.split("/")[0].lower() == snap.handle.lower(),
+                )
+            )
+
+    def _collect_reviews(self, snap: ProfileSnapshot, since: datetime) -> None:
+        query = (
+            f"is:pr reviewed-by:{snap.handle} -author:{snap.handle} "
+            f"updated:>={since.date().isoformat()}"
+        )
+        for raw in self.client.paginate(
+            "/search/issues", {"q": query, "sort": "updated"}, max_pages=2
+        ):
+            repo = _repo_from_issue_url(raw.get("repository_url", ""))
+            if not repo:
+                continue
+            snap.reviews.append(
+                ReviewActivity(
+                    repo=repo,
+                    number=raw.get("number", 0),
+                    # The search index exposes update time, not review time;
+                    # it is the best available proxy and is only used for the
+                    # week bucket.
+                    submitted_at=raw.get("updated_at"),
+                    is_own_repo=repo.split("/")[0].lower() == snap.handle.lower(),
+                )
+            )
+
+
+def _parse(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _repo_from_issue_url(url: str) -> str:
+    """'https://api.github.com/repos/owner/name' -> 'owner/name'."""
+    marker = "/repos/"
+    if marker not in url:
+        return ""
+    return url.split(marker, 1)[1]

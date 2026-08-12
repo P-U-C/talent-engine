@@ -1,0 +1,64 @@
+{
+  "key": "recruit-agent-infra",
+  "name": "Recruitment — agent infrastructure / protocol engineering",
+  "window_months": 12,
+  "mode": "recruitment",
+  "context_statement_enabled": false,
+  "weights": {
+    "shipping_agency": 30,
+    "consistency": 15,
+    "external_validation": 15,
+    "collaboration": 12,
+    "ecosystem_footprint": 10,
+    "frontier_signal": 8,
+    "context_statement": 0,
+    "trusted_referral": 10
+  },
+  "ecosystem": {
+    "topics": [
+      "distributed-systems",
+      "infrastructure",
+      "protocol",
+      "rust",
+      "golang",
+      "grpc",
+      "observability",
+      "kubernetes"
+    ],
+    "keywords": [
+      "protocol",
+      "runtime",
+      "scheduler",
+      "consensus",
+      "distributed",
+      "grpc",
+      "rpc",
+      "sdk",
+      "toolchain"
+    ],
+    "languages": ["rust", "go", "zig", "c++"]
+  },
+  "frontier": {
+    "orgs": ["modelcontextprotocol", "elizaos", "valory-xyz"],
+    "topics": ["mcp", "model-context-protocol", "ai-agents", "agentic", "a2a"],
+    "keywords": [
+      "mcp",
+      "model context protocol",
+      "agent runtime",
+      "tool calling",
+      "a2a",
+      "agent-to-agent",
+      "autonomous agent",
+      "agentic"
+    ],
+    "languages": []
+  },
+  "referrers": [],
+  "thresholds": {
+    "new_account_days": 180,
+    "burst_week_threshold": 2,
+    "burst_commit_discount": 0.05,
+    "inactivity_days": 45,
+    "metric_inflation_commits_per_week": 60
+  }
+}

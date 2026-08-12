@@ -1,0 +1,119 @@
+{
+  "key": "celo-trial",
+  "name": "Celo Ecosystem Builder Trial (5 builders)",
+  "window_months": 6,
+  "mode": "program",
+  "context_statement_enabled": true,
+  "weights": {
+    "shipping_agency": 25,
+    "consistency": 15,
+    "external_validation": 12,
+    "collaboration": 8,
+    "ecosystem_footprint": 10,
+    "frontier_signal": 10,
+    "context_statement": 10,
+    "trusted_referral": 10
+  },
+  "ecosystem": {
+    "orgs": [
+      "celo-org",
+      "celo-academy",
+      "mento-protocol",
+      "valora-inc",
+      "ethereum",
+      "ethereum-optimism",
+      "safe-global",
+      "openzeppelin",
+      "wagmi-dev",
+      "wevm"
+    ],
+    "topics": [
+      "celo",
+      "minipay",
+      "ethereum",
+      "evm",
+      "solidity",
+      "smart-contracts",
+      "web3",
+      "defi",
+      "stablecoin",
+      "erc20",
+      "erc721",
+      "account-abstraction",
+      "l2"
+    ],
+    "keywords": [
+      "celo",
+      "minipay",
+      "mento",
+      "valora",
+      "ethereum",
+      "evm",
+      "solidity",
+      "smart contract",
+      "web3",
+      "defi",
+      "stablecoin",
+      "onchain",
+      "on-chain",
+      "wallet",
+      "dapp"
+    ],
+    "languages": ["solidity", "vyper", "move", "cairo"]
+  },
+  "frontier": {
+    "orgs": [
+      "modelcontextprotocol",
+      "coinbase",
+      "elizaos",
+      "valory-xyz",
+      "google-agentic-commerce"
+    ],
+    "topics": [
+      "mcp",
+      "model-context-protocol",
+      "erc-8004",
+      "x402",
+      "a2a",
+      "agentkit",
+      "ai-agents",
+      "autonomous-agents",
+      "agentic"
+    ],
+    "keywords": [
+      "mcp",
+      "model context protocol",
+      "erc-8004",
+      "erc8004",
+      "x402",
+      "a2a",
+      "agent-to-agent",
+      "elizaos",
+      "eliza",
+      "olas",
+      "autonolas",
+      "valory",
+      "agentkit",
+      "ap2",
+      "agent payments",
+      "autonomous agent",
+      "agentic"
+    ],
+    "languages": []
+  },
+  "referrers_env": "CELO_SCOUT_REGISTRY",
+  "referrers": [
+    "Celo Regional Scout - West Africa",
+    "Celo Regional Scout - East Africa",
+    "Celo Regional Scout - LATAM",
+    "Celo Regional Scout - South Asia",
+    "Celo Regional Scout - Southeast Asia"
+  ],
+  "thresholds": {
+    "new_account_days": 180,
+    "burst_week_threshold": 2,
+    "burst_commit_discount": 0.05,
+    "inactivity_days": 30,
+    "metric_inflation_commits_per_week": 60
+  }
+}

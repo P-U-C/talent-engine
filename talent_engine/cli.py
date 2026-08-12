@@ -1,0 +1,291 @@
+"""Command line interface.
+
+    talent-engine score   --program celo-trial --handles a,b,c
+    talent-engine score   --program celo-trial --csv applications.csv
+    talent-engine scout   --program celo-trial --seeds celo-org/celo-composer
+    talent-engine monitor --program celo-trial
+    talent-engine measure --program celo-trial --baseline run_x --endline run_y
+    talent-engine verify  --run run_x --handle octocat
+    talent-engine dossier --run run_x --handle octocat
+    talent-engine runs    --program celo-trial
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+from .config import load_program
+from .github.auth import AnonymousAuth, auth_from_env
+from .github.client import GitHubClient, ResponseCache
+from .github.collector import Collector
+from .ingest.normalize import normalize_handle, read_applications_report
+from .model import Application
+from .modes.monitor import assess, measure as measure_deltas
+from .modes.scout import Scout
+from .report import dossier, ranked_table, scores_to_csv, scores_to_json
+from .scoring.engine import CODE_VERSION, rank, score_snapshot
+from .store.db import Store
+
+DEFAULT_DB = "talent_engine.db"
+DEFAULT_CACHE = ".cache/github.sqlite"
+
+
+def _client(args) -> GitHubClient:
+    auth = auth_from_env(dict(os.environ))
+    if isinstance(auth, AnonymousAuth):
+        print(
+            "warning: no GitHub credentials found (GITHUB_TOKEN or GITHUB_APP_*).\n"
+            "         Anonymous access is 60 requests/hour and will produce partial\n"
+            "         snapshots for all but the smallest runs.",
+            file=sys.stderr,
+        )
+    cache = None if args.no_cache else ResponseCache(args.cache)
+    return GitHubClient(auth=auth, cache=cache, budget=args.budget)
+
+
+# ------------------------------------------------------------------- score
+
+
+def cmd_score(args) -> int:
+    cfg = load_program(args.program)
+    store = Store(args.db)
+    client = _client(args)
+    collector = Collector(client, window_days=cfg.window_days)
+
+    targets: list[tuple[str, Application]] = []
+    if args.csv:
+        good, bad = read_applications_report(args.csv)
+        targets = [(h, app) for h, app, _ in good]
+        if bad:
+            print(
+                f"warning: {len(bad)} row(s) had no usable GitHub handle and were "
+                f"skipped (they are not scored, not zero-scored)",
+                file=sys.stderr,
+            )
+    if args.handles:
+        for raw in args.handles.split(","):
+            handle = normalize_handle(raw)
+            if handle:
+                targets.append((handle, Application()))
+            else:
+                print(f"warning: {raw!r} is not a valid GitHub handle", file=sys.stderr)
+
+    if not targets:
+        print("nothing to score: pass --handles or --csv", file=sys.stderr)
+        return 2
+
+    run_id = store.start_run(cfg, "score", CODE_VERSION, note=args.note)
+    scores = []
+    for handle, app in targets:
+        snap = collector.collect(handle, app)
+        store.save_snapshot(snap)
+        score = score_snapshot(snap, cfg)
+        store.save_score(run_id, score)
+        scores.append(score)
+        print(f"  scored {handle}: {score.total:.2f}", file=sys.stderr)
+
+    ordered = rank(scores)
+    _emit(ordered, cfg, args)
+    print(f"\nrun_id: {run_id}   ({client.stats})", file=sys.stderr)
+    store.close()
+    return 0
+
+
+def _emit(ordered, cfg, args) -> None:
+    if args.format == "json":
+        print(scores_to_json(ordered))
+    elif args.format == "csv":
+        print(scores_to_csv(ordered))
+    else:
+        print(ranked_table(ordered, limit=args.limit))
+    if args.dossier_dir:
+        out = Path(args.dossier_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        for s in ordered:
+            (out / f"{s.handle}.md").write_text(dossier(s, cfg))
+        print(f"\nwrote {len(ordered)} dossiers to {out}/", file=sys.stderr)
+
+
+# ------------------------------------------------------------------- scout
+
+
+def cmd_scout(args) -> int:
+    cfg = load_program(args.program)
+    client = _client(args)
+    scout = Scout(client, cfg, window_days=cfg.window_days)
+    seeds = [s.strip() for s in (args.seeds or "").split(",") if s.strip()]
+
+    candidates = scout.run(seeds)
+    if args.format == "json":
+        print(json.dumps([c.to_dict() for c in candidates], indent=2))
+    else:
+        print(f"{'handle':<28} {'ch':>2}  channels / why")
+        print("-" * 78)
+        for c in candidates[: args.limit or 50]:
+            print(
+                f"{c.handle:<28} {c.corroboration:>2}  "
+                f"{','.join(sorted(c.channels))}: {c.reasons[0] if c.reasons else ''}"
+            )
+    for note in scout.notes:
+        print(f"note: {note}", file=sys.stderr)
+    print(f"\n{len(candidates)} candidates   ({client.stats})", file=sys.stderr)
+    return 0
+
+
+# ----------------------------------------------------------------- monitor
+
+
+def cmd_monitor(args) -> int:
+    cfg = load_program(args.program)
+    store = Store(args.db)
+    client = _client(args)
+    collector = Collector(client, window_days=cfg.thresholds.inactivity_days * 2)
+
+    members = store.cohort(cfg.key)
+    if not members:
+        print(f"no cohort selected for {cfg.key}", file=sys.stderr)
+        return 2
+
+    statuses = []
+    for m in members:
+        snap = collector.collect(m["handle"])
+        statuses.append(assess(snap, cfg, declared_repo=m["declared_repo"] or ""))
+
+    if args.format == "json":
+        print(json.dumps([s.to_dict() for s in statuses], indent=2))
+    else:
+        for s in statuses:
+            days = "never" if s.days_since_activity is None else f"{s.days_since_activity}d"
+            repo = ""
+            if s.declared_repo:
+                repo = f"  declared_repo={'active' if s.declared_repo_active else 'QUIET'}"
+            print(f"{s.state:<9} {s.handle:<24} last activity {days}{repo}")
+            for n in s.notes:
+                print(f"          note: {n}")
+    store.close()
+    return 0
+
+
+# ----------------------------------------------------------------- measure
+
+
+def cmd_measure(args) -> int:
+    from .model import CandidateScore
+
+    store = Store(args.db)
+
+    def load(run_id: str) -> list[CandidateScore]:
+        out = []
+        for row in store.scores_for_run(run_id):
+            out.append(store.replay(run_id, row["handle"]))
+        return out
+
+    result = measure_deltas(load(args.baseline), load(args.endline))
+    print(json.dumps(result, indent=2))
+    store.close()
+    return 0
+
+
+# ------------------------------------------------------------------ verify
+
+
+def cmd_verify(args) -> int:
+    store = Store(args.db)
+    result = store.verify(args.run, args.handle)
+    print(json.dumps(result, indent=2))
+    store.close()
+    return 0 if result["matches"] else 1
+
+
+def cmd_dossier(args) -> int:
+    store = Store(args.db)
+    run = store.get_run(args.run)
+    if not run:
+        print(f"no such run {args.run}", file=sys.stderr)
+        return 2
+    from .config import ProgramConfig
+
+    cfg = ProgramConfig.from_dict(json.loads(run["config_json"]))
+    print(dossier(store.replay(args.run, args.handle), cfg))
+    store.close()
+    return 0
+
+
+def cmd_runs(args) -> int:
+    store = Store(args.db)
+    for r in store.list_runs(args.program):
+        print(
+            f"{r['run_id']}  {r['started_at']}  {r['program']:<16} {r['mode']:<8} "
+            f"{r['code_version']}  {r['note']}"
+        )
+    store.close()
+    return 0
+
+
+# -------------------------------------------------------------------- main
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="talent-engine", description=__doc__)
+    p.add_argument("--db", default=DEFAULT_DB)
+    p.add_argument("--cache", default=DEFAULT_CACHE)
+    p.add_argument("--no-cache", action="store_true")
+    p.add_argument("--budget", type=int, default=4000, help="max API requests this run")
+    sub = p.add_subparsers(dest="command", required=True)
+
+    s = sub.add_parser("score")
+    s.add_argument("--program", required=True)
+    s.add_argument("--handles")
+    s.add_argument("--csv")
+    s.add_argument("--format", choices=["table", "json", "csv"], default="table")
+    s.add_argument("--limit", type=int)
+    s.add_argument("--dossier-dir")
+    s.add_argument("--note", default="")
+    s.set_defaults(func=cmd_score)
+
+    s = sub.add_parser("scout")
+    s.add_argument("--program", required=True)
+    s.add_argument("--seeds", help="comma-separated owner/repo seeds")
+    s.add_argument("--format", choices=["table", "json"], default="table")
+    s.add_argument("--limit", type=int)
+    s.set_defaults(func=cmd_scout)
+
+    s = sub.add_parser("monitor")
+    s.add_argument("--program", required=True)
+    s.add_argument("--format", choices=["table", "json"], default="table")
+    s.set_defaults(func=cmd_monitor)
+
+    s = sub.add_parser("measure")
+    s.add_argument("--program", required=True)
+    s.add_argument("--baseline", required=True)
+    s.add_argument("--endline", required=True)
+    s.set_defaults(func=cmd_measure)
+
+    s = sub.add_parser("verify")
+    s.add_argument("--run", required=True)
+    s.add_argument("--handle", required=True)
+    s.set_defaults(func=cmd_verify)
+
+    s = sub.add_parser("dossier")
+    s.add_argument("--run", required=True)
+    s.add_argument("--handle", required=True)
+    s.set_defaults(func=cmd_dossier)
+
+    s = sub.add_parser("runs")
+    s.add_argument("--program")
+    s.set_defaults(func=cmd_runs)
+
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

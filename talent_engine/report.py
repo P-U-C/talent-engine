@@ -1,0 +1,133 @@
+"""Human-facing output: ranked tables and per-candidate evidence dossiers.
+
+The dossier is the trust mechanism made concrete.  A candidate should be able to
+read it and either agree with the number or point at the specific line that is
+wrong.  That means every point shown has to trace to a URL, and the arithmetic
+has to be visible rather than summarised.
+"""
+
+from __future__ import annotations
+
+import csv
+import io
+import json
+from typing import Any, Iterable
+
+from .config import ProgramConfig
+from .model import CandidateScore
+
+SEVERITY_MARK = {"critical": "!!", "warn": " !", "review": " ?"}
+
+
+def ranked_table(scores: Iterable[CandidateScore], *, limit: int | None = None) -> str:
+    rows = list(scores)[: limit or None]
+    if not rows:
+        return "(no candidates)"
+    width = max(len(s.handle) for s in rows)
+    out = [f"{'#':>3}  {'handle':<{width}}  {'total':>6}  {'auto':>5}  {'app':>5}  flags"]
+    out.append("-" * (len(out[0]) + 8))
+    for i, s in enumerate(rows, 1):
+        flags = ", ".join(
+            f"{SEVERITY_MARK.get(f.severity, '')}{f.key}".strip() for f in s.flags
+        )
+        out.append(
+            f"{i:>3}  {s.handle:<{width}}  {s.total:>6.2f}  "
+            f"{s.automated_total:>5.1f}  {s.application_total:>5.1f}  {flags or '-'}"
+        )
+    return "\n".join(out)
+
+
+def dossier(score: CandidateScore, cfg: ProgramConfig) -> str:
+    """Markdown evidence dossier for one candidate."""
+    lines: list[str] = []
+    add = lines.append
+
+    add(f"# {score.handle} — {score.total:.2f} / {sum(cfg.weights.values()):.0f}")
+    add("")
+    add(f"**Program:** {cfg.name} (`{score.program}`)  ")
+    add(f"**Window:** {score.window_start[:10]} → {score.window_end[:10]}  ")
+    add(f"**Profile:** https://github.com/{score.handle}")
+    add("")
+    add(
+        f"Automated signal: **{score.automated_total:.2f}** · "
+        f"Application-declared: **{score.application_total:.2f}**"
+    )
+    add("")
+
+    if score.flags:
+        add("## Review flags")
+        add("")
+        add("_Flags never add or subtract points on their own; where a flag "
+            "discounts a component, that is shown in the dimension below._")
+        add("")
+        for f in score.flags:
+            add(f"- **{f.key}** ({f.severity}) — {f.message}")
+            for e in f.evidence:
+                add(f"  - [{e.claim}]({e.url})")
+        add("")
+
+    add("## Score breakdown")
+    add("")
+    for d in score.dimensions:
+        pct = (d.points / d.max_points * 100) if d.max_points else 0
+        add(f"### {d.key} — {d.points:.2f} / {d.max_points:.0f} ({pct:.0f}%)")
+        if d.components:
+            parts = ", ".join(f"{k} = {v:g}" for k, v in d.components.items())
+            add(f"")
+            add(f"`{parts}`")
+        for note in d.notes:
+            add(f"")
+            add(f"> {note}")
+        if d.evidence:
+            add("")
+            for e in d.evidence:
+                detail = f" — {e.detail}" if e.detail else ""
+                add(f"- [{e.claim}]({e.url}){detail}")
+        elif d.points == 0:
+            add("")
+            add("- _no qualifying activity found in window_")
+        add("")
+
+    add("## Reproducing this score")
+    add("")
+    add("```")
+    add(f"snapshot_digest : {score.snapshot_digest}")
+    add(f"weights_digest  : {score.weights_digest}")
+    add(f"code_version    : {score.code_version}")
+    add(f"scored_at       : {score.scored_at}")
+    add("```")
+    add("")
+    add(
+        "The rubric, the weights, and the scorer are public. Re-running the same "
+        "snapshot through the same weights reproduces this number exactly; "
+        "`talent-engine verify` does it for you."
+    )
+    return "\n".join(lines)
+
+
+def scores_to_csv(scores: Iterable[CandidateScore]) -> str:
+    rows = list(scores)
+    buf = io.StringIO()
+    dims = [d.key for d in rows[0].dimensions] if rows else []
+    writer = csv.writer(buf)
+    writer.writerow(
+        ["rank", "handle", "total", "automated", "application", *dims, "flags", "profile"]
+    )
+    for i, s in enumerate(rows, 1):
+        writer.writerow(
+            [
+                i,
+                s.handle,
+                f"{s.total:.2f}",
+                f"{s.automated_total:.2f}",
+                f"{s.application_total:.2f}",
+                *[f"{(s.dimension(k).points if s.dimension(k) else 0):.2f}" for k in dims],
+                "|".join(f.key for f in s.flags),
+                f"https://github.com/{s.handle}",
+            ]
+        )
+    return buf.getvalue()
+
+
+def scores_to_json(scores: Iterable[CandidateScore]) -> str:
+    return json.dumps([s.to_dict() for s in scores], indent=2)
