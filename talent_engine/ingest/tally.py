@@ -188,9 +188,14 @@ def parse_webhook(payload: dict[str, Any]) -> Submission:
         label = str(f.get("label") or f.get("key") or "")
         values.append((label, str(f.get("type") or ""), _resolve(f)))
 
-    def pick(keys: tuple[str, ...], *, exclude_contact_types: bool = False) -> str:
+    def pick(keys: tuple[str, ...], *, exclude_contact: bool = False) -> str:
         for label, ftype, value in values:
-            if exclude_contact_types and ftype in CONTACT_TYPES:
+            # "Telegram handle" matches HANDLE_KEYS on the word "handle", and a
+            # form that asks for it before the GitHub question would otherwise
+            # score the applicant's Telegram name as their GitHub login. Field
+            # order must not decide this, so contact fields are skipped by
+            # label as well as by type.
+            if exclude_contact and (ftype in CONTACT_TYPES or _match(label, CONTACT_KEYS)):
                 continue
             flat = _flatten(value)
             if flat and _match(label, keys):
@@ -207,7 +212,7 @@ def parse_webhook(payload: dict[str, Any]) -> Submission:
                     return [p.strip() for p in re.split(r"[;,|]", flat) if p.strip()]
         return []
 
-    raw_handle = pick(HANDLE_KEYS, exclude_contact_types=True)
+    raw_handle = pick(HANDLE_KEYS, exclude_contact=True)
     handle = normalize_handle(raw_handle) or ""
 
     contact = Contact(

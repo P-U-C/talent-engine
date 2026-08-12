@@ -21,7 +21,7 @@ HANDLE_KEYS = ("github", "github_handle", "github_username", "handle", "username
 CONTEXT_KEYS = ("context_statement", "access_barrier", "barrier", "context", "statement")
 FACTOR_KEYS = ("context_factors", "factors", "barriers")
 REFERRER_KEYS = ("referrer", "referrer_name", "referred_by", "scout", "endorsed_by")
-REPO_KEYS = ("declared_repo", "project_repo", "repo", "project")
+REPO_KEYS = ("declared_repo", "project_repo", "repository", "repo", "project")
 PLAN_KEYS = ("build_plan", "plan", "proposal")
 
 
