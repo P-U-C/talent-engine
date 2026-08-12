@@ -218,10 +218,10 @@ None of these are scoring-curve tweaks; two are collection changes:
 1. **Independence of the validating repository.** Count a merged PR as external
    validation only when the receiving repository shows independence — other
    contributors, meaningful age before the PR, or contributors with no other
-   overlap with the applicant. Requires collecting contributor lists. *Still
-   outstanding.*
-2. **Overlap detection across applicants.** ✅ **Built** — see
-   `talent_engine/modes/rings.py` and the section below.
+   overlap with the applicant. Requires collecting contributor lists.
+   **Outstanding, and the highest-value remaining work:** it is what would
+   catch a ring whose members never applied.
+2. **Overlap detection across applicants.** Built — see below.
 3. **Substance behind finishing metadata.** A release with no assets, a
    homepage that does not resolve, a licence added in the same commit as the
    description — all cheap to check, all currently unchecked.
@@ -261,23 +261,7 @@ their own cluster or to accounts the program does not recognise, rather than to
 projects whose review bar means something independently. A real community has
 edges pointing outward; a ring, by construction, mostly does not.
 
-### Two independent reviews broke the first design
-
-A single threshold on insularity failed in **both** directions, and two
-external reviewers found it from different angles.
-
-**Evasion.** Two throwaway pull requests per account into a recognised project
-dropped a four-account ring from 1.00 to 0.60 — under the 0.75 line — and those
-same pull requests scored *positively* elsewhere in the rubric. The attack cost
-roughly ten minutes per account.
-
-**False positive.** Two people building one product together score insularity
-1.00, identical to the canonical ring, because they validate only each other.
-The first design would have flagged every founding team in the pool.
-
-Neither is fixable by moving the threshold: they sit on opposite sides of it.
-
-### What replaced it: corroboration
+### The discriminator is corroboration, not a threshold
 
 Four independent signals, each individually weak and individually evadable:
 
@@ -289,31 +273,37 @@ Four independent signals, each individually weak and individually evadable:
 | `thin_outside` | the median member has ≤2 accepted contributions to a recognised project |
 
 A cluster is flagged when it has **at least three members** and **at least two
-signals fire**. Groups of two are reported and never flagged: a pair that
-validates only each other is the normal shape of a founding team and is
-structurally indistinguishable from a two-account ring, and defaming real
-co-founders is the more expensive error.
+signals fire**.
 
-Measured:
+Groups of two are reported and never flagged. A pair that validates only each
+other is the normal shape of a founding team and is structurally
+indistinguishable from a two-account ring; defaming real co-founders is the
+more expensive error.
+
+No single signal decides anything, because no single signal survives contact
+with an adversary. A ratio can be bought down with two throwaway pull requests
+per account. Density alone flags any small team. Synchronised account creation
+alone flags a cohort that joined GitHub for the same bootcamp. Requiring two to
+agree means evading the check costs building genuine outside track records on
+several accounts, spaced apart in time, with asymmetric collaboration — which
+is most of the work of being real.
+
+Measured on the fixtures in `tests/test_rings.py`:
 
 | pool | size | signals fired | flagged |
 |---|---|---|---|
 | ring, no cover | 4 | insular, dense, synchronised, thin | **review** |
-| ring + 2 decoy PRs each *(beat the old design)* | 4 | dense, synchronised, thin | **review** |
+| ring + 2 decoy PRs each | 4 | dense, synchronised, thin | **review** |
 | ring + 4 decoy PRs each | 4 | dense, synchronised | **review** |
-| two real co-founders *(beat the old design)* | 2 | insular, dense, thin | no |
+| two real co-founders | 2 | insular, dense, thin | no |
 | three real collaborators | 3 | dense | no |
 
-Buying down one signal leaves the others standing. Evading all four means
-building genuine outside track records on several accounts, spaced apart in
-time, with asymmetric collaboration — which is most of the work of being real.
+An unrecognised account is not independent evidence whether or not it has
+applied — otherwise a ring could drop below the line by withholding one member.
 
-### The earlier hole, kept for the record
-
-The first metric counted an edge to a ring member who had not yet applied as
-*outside* validation, so withholding one account dropped the group under the
-line. An unrecognised account is now not independent evidence whether or not it
-has applied.
+The output names which signals fired, and is written as an observation rather
+than a verdict. `needs_review` never rejects anybody: the programme overlay
+forbids an automated signal from making a funding decision.
 
 ### Known limits
 

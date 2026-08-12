@@ -1,181 +1,143 @@
-# What happens after someone is accepted
+# Sponsorship terms
 
-**Status: agreed and enforced in code.** `policies/prezenti-sponsorship-trial.json` carries these terms and `ProgramOverlay` refuses to load an overlay that breaks them.
+What an accepted builder receives, what they are asked for in return, what the
+programme owes them, and how each part is enforced. This describes the terms as
+they stand; `policies/prezenti-sponsorship-trial.json` is the source of truth
+and `ProgramOverlay` refuses to load a policy that breaks the rules below.
 
-Design notes on the give-back, the pledge, and 0xSplits. Not legal advice; the
-pledge form already collects governing law and dispute resolution, which means
-somebody should have a lawyer read the final wording.
+Not legal advice. The pledge collects governing law and dispute resolution,
+which means a lawyer should read the final wording — see *Gaps* at the end.
 
-## What the two mechanisms actually do
+## The offer
 
-They are often discussed together as if they combine into enforcement. They do
-not, and the distinction decides everything downstream.
+Five places, four months, $1,400 per person: Claude Max 20x and ChatGPT Pro for
+the term, plus a $200 one-off allowance. $7,000 total.
 
-**The Prezenti Pledge** (`prezenti/prezenti-pledge`) writes an EAS attestation
-on Celo — pledgor, amount, type, frequency, governing law — signed by the
-builder's wallet. That is a *public, timestamped, signed promise*. Its force is
-reputational: it is visible, it is attributable, and breaking it is legible to
-everyone who looks. That is real, and it is not nothing.
+## The give-back
 
-**0xSplits** (natively supported on Celo) *distributes* funds that arrive at a
-split contract, automatically and trustlessly. It has no reach over funds that
-arrive anywhere else.
+2% of revenue the sponsored project receives through Celo, and of grant, prize
+and retro-funding income won with the sponsored work.
 
-So the honest position: **on-chain gives you a credible promise and frictionless
-payment when it is honoured. It does not give you a claim.** Revenue landing in
-a builder's own wallet, or a Stripe account, is untouched by either mechanism.
-Any design that assumes otherwise is decoration.
-
-That is not a reason to abandon the idea. It is a reason to pick an instrument
-whose value does not depend on enforcement.
-
-## The problem with 2% of revenue
-
-The current overlay pledges 200bps of "revenue actually received by the product
-through Celo", split evenly between Prezenti and the Celo Community Fund. Three
-problems, in increasing order of importance.
-
-**It is worth approximately nothing in expectation.** Most sponsored builders
-will have no revenue in three years. The ones who do will mostly have small
-revenue. 2% of small revenue is a rounding error against the cost of tracking
-it, invoicing it, and chasing it.
-
-**It is actively harmful in the one case that matters.** A revenue-share
-encumbrance is the kind of thing a seed investor finds in diligence and asks to
-have removed. An uncapped, perpetual 2% of gross revenue attached to a company
-by a $1,400 in-kind grant is disproportionate enough to be embarrassing to
-defend, and the builder will come back asking to buy it out. That conversation
-costs more goodwill than the term will ever return.
-
-**It selects against the people the engine exists to find.** This is the
-decisive argument. The whole thesis is finding high-agency builders who are
-under-recognised — people who *could* get funded elsewhere but have not been
-seen yet. Those people have alternatives. A builder with options reads
-"perpetual 2% of revenue for $1,400 of Claude credits" and declines; a builder
-with no options signs anything. Aggressive terms therefore filter the applicant
-pool toward exactly the profiles the rubric is designed to look past. The terms
-would quietly undo the sourcing.
-
-For scale: $1,400 for 2% implies a $70,000 valuation on the upside claim. Y
-Combinator's $500,000 for 7% implies roughly $7,000,000. The comparison is not
-apples to apples — revenue share is not equity — but the order of magnitude is
-worth seeing before deciding the terms are generous.
-
-## What to take instead
-
-Ordered by what I would actually do.
-
-**1. Cap it and sunset it.** Keep 2% of Celo revenue, but cap the total at a
-multiple of the sponsorship — 10x is $14,000 — and expire it three years after
-the term ends. This converts an open-ended encumbrance into a finite,
-comprehensible "pay it forward". Nearly every sponsored builder will pay zero
-either way; the difference is entirely in whether a good builder is willing to
-sign, and in whether it survives a future diligence process. Cheap to concede,
-large effect on acceptance.
-
-**2. Pro-rate it against what they actually received.** The overlay already has
-a month-two Celo gate, an inactivity review, and a cure period, so someone can
-leave after one month. Nothing currently says their obligation is smaller than
-someone who completed four. It should be: give-back scales with months of
-sponsorship actually taken. Otherwise the terms punish the person who
-honourably withdrew early.
-
-**3. Take a right of first offer, not equity.** The right to be offered
-participation in their next financing round costs the builder nothing today,
-creates no cap-table object, needs no enforcement, and is where the real upside
-lives at this cheque size. It is also the term a good builder finds reasonable,
-which matters more than its expected value.
-
-**4. Extend the give-back to grant and prize income, not just product
-revenue.** This is where money actually appears for early builders — hackathons,
-retro funding, ecosystem grants — and it arrives on-chain already, which makes
-it the one category a Splits address can genuinely capture. A builder who wins a
-$20,000 grant with work Prezenti sponsored will feel entirely fine sending 2%
-back. A builder with a struggling product will resent an invoice.
-
-**5. Be honest that the main return is reputational.** At $7,000 across five
-people, the realistic return is not financial. It is that Prezenti found these
-people first, publicly, with an evidence trail — and that compounds into deal
-flow, standing in the ecosystem, and a defensible claim to a sourcing method
-that works. The scoring engine being open source is part of that return.
-
-## Mechanics, if this goes ahead
-
-- Create the split **at acceptance**, not at first revenue. It costs little,
-  and it makes the give-back a thing that already exists rather than a thing
-  someone has to set up later, at exactly the moment they least want to.
-- Make the split **immutable** and use long-lived Prezenti and Celo Community
-  Fund addresses. A mutable split needs a controller, and a controller is a
-  party the builder has to trust not to change the terms after the fact.
-- Put the split address in the acceptance email, alongside the pledge link.
-  Routing revenue through it stays voluntary; the point is that it is
-  frictionless when they choose to.
-- The pledge attestation should record the **capped, pro-rated, sunsetting**
-  terms, not the current open-ended ones — the attestation is the public
-  artefact, so it should say the thing you actually want to be held to.
-- Record the split address and the attestation UID against the cohort row, so
-  `monitor` and `measure` can see them.
-
-## The connection to selection integrity
-
-The gaming pressure on this pipeline is a function of what is at the end of it.
-Today the prize is $1,400 of AI subscriptions, which is worth manufacturing a
-profile for but not worth building an elaborate operation for. Attach a real
-equity claim and that changes: the ring detection in `modes/rings.py` moves
-from precautionary to load-bearing, and the outstanding item — contributor
-lists of validating repositories, which would catch a ring whose members never
-applied — stops being optional.
-
-Decide the terms and the selection defences together, not in sequence.
-
-
-## Agreed position
-
-The framing that settled it: this is about building relationships, not about
-extracting initial monetary value. At $1,400 a head the financial claim was
-never going to be the return — the standing, the deal flow and the goodwill
-are. Terms that read as grasping cost more of that than they could ever
-recover.
-
-So the give-back stays, because reciprocity is part of the relationship, but it
-is bounded in every direction a person would reasonably worry about:
-
-| term | value | why |
+| bound | value | why it exists |
 |---|---|---|
-| give-back | 200bps of Celo revenue | unchanged |
-| also applies to | grant, prize and retro-funding income | where early money actually lands, and the one category a Splits address can capture |
-| cap | 10x sponsorship — $14,000 | makes it finite and survivable in diligence |
-| sunset | 36 months after term end | it ends |
-| pro-rating | by months actually received | leaving at the month-two gate halves it |
-| enforcement | reputational | stated plainly rather than implied |
-| equity | none taken | — |
-| upside | right of first offer on the next round, 14 days' notice | costs nothing today, needs no enforcement |
+| cap | 10× sponsorship — $14,000 | an open-ended claim from an in-kind grant is the kind of encumbrance a later investor asks to have removed |
+| sunset | 36 months after the term ends | it has to end |
+| pro-rating | by months actually received | otherwise someone who withdrew honourably at the month-two gate owes what someone who completed four owes |
+| enforcement | reputational | stated rather than implied |
 
-### What the program owes in return
+Grant and prize income is included because that is where money actually appears
+for early builders, and it arrives on-chain, which makes it the one category a
+Splits address can genuinely capture.
 
-Terms that run one way are not a relationship, so the overlay now refuses to
-load without a `commitments_to_recipient` block, and specifically without
-guaranteeing that the recipient keeps all IP and equity and may withdraw
-without penalty. The current set:
+**No equity is taken.** The upside instrument is a right of first offer on a
+future round with 14 days' notice — a right to be *offered* participation, not
+an obligation to grant it. It costs the builder nothing today, creates no
+cap-table object, and needs no enforcement.
 
-- keeps all IP and equity
-- no exclusivity
-- may withdraw without penalty
-- a public record of having been backed
-- introductions on request
-- their score and its evidence shared with them
-- feedback to unsuccessful applicants
+## What the programme owes the recipient
 
-That last one costs real time and is the one most programs skip. It is also the
-one that makes the difference between an applicant who was rejected and an
-applicant who was treated with respect, and the second person tells other
-people to apply.
+Terms that run one way are not a relationship, and at this cheque size the
+relationship is the entire return.
 
-### Enforced, not documented
+- Keeps all IP and all equity
+- No exclusivity
+- May withdraw without penalty
+- A public record of having been backed
+- Introductions on request
+- Their score and its evidence shared with them
+- Feedback to unsuccessful applicants
 
-`ProgramOverlay.__post_init__` refuses an uncapped give-back, a give-back that
-never expires, one that is not pro-rated, any overlay that takes equity, and
-any overlay that does not say what the program owes. `giveback_owed_bps(months)`
-does the pro-rating. The reasoning lives in this document; the guarantees live
-in the code, because a policy that exists only in prose drifts the first time
-somebody is in a hurry.
+The last is the one most programmes skip. It is implemented, not just promised:
+`talent-engine decline` generates specific feedback from the evidence the
+decision was made on, and `feedback-queue` exits non-zero while anyone is still
+waiting.
+
+## What the on-chain parts do, and do not do
+
+These are frequently discussed as if they combine into enforcement. They do
+not, and that governs the choice of instrument.
+
+**The Prezenti Pledge** writes an EAS attestation on Celo, signed by the
+builder's wallet. That is a public, timestamped, signed promise. Its force is
+reputational — visible, attributable, and legible to anyone who looks.
+
+**0xSplits** distributes funds that arrive at a split contract. It has no reach
+over funds that arrive anywhere else.
+
+Together they give a credible promise and frictionless payment when it is
+honoured. They do not give a claim. Revenue landing in a builder's own wallet,
+or a Stripe account, is untouched by either. The terms are therefore shaped so
+their value does not depend on enforcement.
+
+## Why the terms are bounded rather than maximal
+
+The binding constraint is not what Prezenti could extract, it is who accepts.
+
+The engine exists to find high-agency builders who are under-recognised —
+people who *could* be funded elsewhere but have not been seen. Those people have
+alternatives. A builder with options reads a perpetual uncapped claim attached
+to $1,400 of tooling and declines; a builder with no options signs anything. So
+disproportionate terms filter the pool toward exactly the profiles the rubric is
+built to look past, and the terms would quietly undo the sourcing.
+
+For scale: $1,400 for 2% implies a $70,000 valuation on the claim. It is not
+equity, so the comparison is imperfect, but it is worth seeing before deciding
+the terms are generous.
+
+## Enforcement in code
+
+`ProgramOverlay.__post_init__` refuses to load a policy that:
+
+- permits automated final selection
+- lets an authenticity flag terminate support on its own
+- has an inactivity rule with no cure period
+- has a benefit schedule that does not match the declared budget
+- has give-back recipient shares that do not add up
+- leaves the give-back uncapped, perpetual, or not pro-rated
+- takes equity
+- fails to state what the programme owes, including that the recipient keeps
+  all IP and equity and may withdraw without penalty
+
+`talent-engine serve` loads and validates the policy at startup and **refuses
+to start if it is invalid**, so applications cannot be taken under terms that
+break these rules. The public page renders the terms from the same object, so
+the page cannot say something the code does not enforce.
+
+`giveback_owed_bps(months)` does the pro-rating: two months of a four-month
+term owes 100bps of the 200.
+
+## Mechanics at acceptance
+
+- The split is created **at acceptance**, not at first revenue, so it exists
+  before anyone needs it.
+- It is **immutable**, with long-lived recipient addresses. A mutable split
+  needs a controller, and a controller is a party the builder must trust not to
+  change terms afterwards.
+- Recipient addresses come from environment variables, never the policy file,
+  so the policy can live in a public repository.
+- `talent-engine accept` records the split address and the pledge attestation
+  UID against the cohort row, and prints the letter. **It deploys nothing.**
+  Creating the split needs a funded signing key, and a process that parses
+  untrusted input from a public form is the wrong place to hold one.
+
+## Gaps
+
+Known and unresolved. A sharp builder would ask for these, and they matter in a
+dispute:
+
+- the exact legal parties, governing law and dispute forum
+- tax treatment
+- a precise definition of "revenue actually received"
+- what "won with the sponsored work" covers for grants and prizes
+- ROFO mechanics beyond the notice period
+- assignment and change-of-control treatment
+- a written release once the cap or sunset is satisfied
+
+## Selection integrity is coupled to this
+
+Gaming pressure is a function of what sits at the end of the pipeline. At
+$1,400 of subscriptions a manufactured profile is worth an afternoon, not an
+operation. If the terms ever grow into a real equity claim, the cross-applicant
+checks in `modes/rings.py` move from precautionary to load-bearing, and the
+outstanding collector work — contributor lists of validating repositories —
+stops being optional. Terms and selection defences are decided together.

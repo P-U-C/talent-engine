@@ -57,6 +57,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--program", required=True)
     ap.add_argument("--seeds", default="", help="comma-separated owner/repo seeds")
+    ap.add_argument("--caps", default="", help="owner/repo:N,owner/repo:N per-seed caps")
     ap.add_argument("--db", default=str(Path.home() / "talent-engine-runtime" / "talent_engine.db"))
     ap.add_argument("--cache", default=str(Path.home() / "talent-engine-runtime" / "github-cache.sqlite"))
     ap.add_argument("--budget", type=int, default=1200)
@@ -75,7 +76,17 @@ def main() -> int:
     scout = Scout(client, cfg, window_days=cfg.window_days)
     seeds = [s.strip() for s in args.seeds.split(",") if s.strip()]
 
-    candidates = scout.run(seeds)
+    # Per-seed caps: a large repository would otherwise spend a uniform quota
+    # on maintainer churn while a small dense one contributes almost nothing.
+    caps = {}
+    for entry in (args.caps or "").split(","):
+        if ":" in entry:
+            repo, _, n = entry.partition(":")
+            caps[repo.strip()] = int(n)
+
+    if seeds:
+        scout.from_contributors(seeds, caps=caps)
+    candidates = scout.run([] if seeds else seeds)
     for note in scout.notes:
         print(f"note: {note}", file=sys.stderr)
     print(f"scout returned {len(candidates)} candidate(s) ({client.stats})", file=sys.stderr)

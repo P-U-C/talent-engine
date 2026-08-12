@@ -263,3 +263,59 @@ def test_the_summary_names_the_signals_that_fired(known):
     """A reviewer needs to know which observation to go and check."""
     summary = find_clusters(sockpuppet_pool(), known)[0].summary()
     assert "created within" in summary or "possible pairs" in summary
+
+
+# ------------------------------------------------------------------ scout
+# (kept here rather than a new module: it is the same "do not let volume
+#  masquerade as signal" concern the ring work is about.)
+
+
+def test_bot_accounts_do_not_consume_a_seed_quota():
+    """A busy repository can be mostly Dependabot and CI.
+
+    The quota used to count rows, so a high-traffic repo could spend its whole
+    allocation on bots and surface nobody, while looking like it worked.
+    """
+    from talent_engine.config import load_program
+    from talent_engine.modes.scout import Scout
+
+    class FakeClient:
+        stats = {"requests_spent": 0, "served_from_cache_304": 0}
+
+        def paginate(self, path, params=None, *, max_pages=10):
+            # Nine bots, then one real person.
+            for i in range(9):
+                yield {
+                    "user": {"login": f"dependabot[bot]", "type": "Bot"},
+                    "html_url": f"https://example/{i}",
+                }
+            yield {
+                "user": {"login": "real-person", "type": "User"},
+                "html_url": "https://example/real",
+            }
+
+    scout = Scout(FakeClient(), load_program("prezenti-sponsorship-trial"), window_days=180)
+    scout.from_contributors(["org/busy"], per_repo=3)
+    assert "real-person" in scout.candidates
+    assert not any("bot" in h for h in scout.candidates)
+
+
+def test_per_repository_caps_are_honoured():
+    """A uniform quota lets one noisy repo dominate the digest."""
+    from talent_engine.config import load_program
+    from talent_engine.modes.scout import Scout
+
+    class FakeClient:
+        stats = {"requests_spent": 0, "served_from_cache_304": 0}
+
+        def paginate(self, path, params=None, *, max_pages=10):
+            for i in range(50):
+                yield {
+                    "user": {"login": f"person-{i}", "type": "User"},
+                    "html_url": f"https://example/{i}",
+                }
+
+    cfg = load_program("prezenti-sponsorship-trial")
+    scout = Scout(FakeClient(), cfg, window_days=180)
+    scout.from_contributors(["org/noisy"], per_repo=30, caps={"org/noisy": 5})
+    assert len(scout.candidates) == 5

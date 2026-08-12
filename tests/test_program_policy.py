@@ -206,3 +206,30 @@ def test_the_live_program_carries_the_agreed_terms():
     assert o.upside["equity_taken"] is False
     assert o.commitments_to_recipient["no_exclusivity"] is True
     assert o.commitments_to_recipient["feedback_to_unsuccessful_applicants"] is True
+
+
+def test_the_page_and_the_policy_cannot_disagree():
+    """The public page renders terms from the validated policy object.
+
+    Written twice — once in the policy, once in HTML — they drift, and the
+    version the public reads is the one nothing enforces.
+    """
+    from talent_engine.programs import load_overlay
+    from talent_engine.server import landing_page
+
+    overlay = load_overlay("prezenti-sponsorship-trial")
+    page = landing_page("P", "formid", None, overlay).decode()
+    for line in overlay.terms_summary():
+        assert line in page
+
+
+def test_a_closed_programme_does_not_show_an_application_form():
+    """A page rendering a form is a page saying "apply"."""
+    from talent_engine.programs import load_overlay
+    from talent_engine.server import landing_page
+
+    overlay = load_overlay("prezenti-sponsorship-trial")
+    overlay.status = "closed"
+    page = landing_page("P", "formid", None, overlay).decode()
+    assert "Applications are closed" in page
+    assert "tally.so/embed" not in page
