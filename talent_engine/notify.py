@@ -125,11 +125,23 @@ def notify(subject: str, body: str, telegram_body: str | None = None) -> bool:
 
     The fallback is the point: a notification that goes nowhere is worse than
     the pull-only system this replaced, because it looks like nothing happened.
+
+    When BOTH channels fail, that is logged at error level rather than
+    swallowed. Silence is the exact failure this module exists to prevent, and
+    a returned False that nobody checks is silence.
     """
     if mail_config():
         if send_email(subject, body):
             return True
-    return send(telegram_body if telegram_body is not None else f"{subject}\n\n{body}")
+    if send(telegram_body if telegram_body is not None else f"{subject}\n\n{body}"):
+        return True
+    if not disabled():
+        log.error(
+            "NOTIFICATION LOST: every channel failed for %r. Nobody has been told; "
+            "recover it with `talent-engine submissions`.",
+            subject,
+        )
+    return False
 
 
 def send(text: str, *, timeout: int = 20) -> bool:

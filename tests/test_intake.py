@@ -705,3 +705,22 @@ def test_the_same_person_in_different_case_is_one_submission(live):
     handles = {r["handle"] for r in store.submissions("celo-trial", limit=10)}
     assert handles == {"octocat"}
     store.close()
+
+
+def test_a_totally_failed_notification_is_loud(caplog, monkeypatch):
+    """Both channels down must not be swallowed.
+
+    A notification going nowhere is the failure this layer exists to prevent,
+    and a False return nobody checks is indistinguishable from silence.
+    """
+    import logging
+
+    from talent_engine import notify
+
+    monkeypatch.setenv(notify.DISABLE_ENV, "0")
+    monkeypatch.setattr(notify, "mail_config", lambda: {})
+    monkeypatch.setattr(notify, "send", lambda *a, **k: False)
+
+    with caplog.at_level(logging.ERROR, logger="talent_engine.notify"):
+        assert notify.notify("subject", "body") is False
+    assert any("NOTIFICATION LOST" in r.message for r in caplog.records)
