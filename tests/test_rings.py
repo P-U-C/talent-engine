@@ -35,6 +35,7 @@ def test_the_ring_is_found_and_flagged(known):
     assert ring.size == 4
     assert ring.mean_insularity == 1.0  # nobody outside the group ever merged their work
     assert ring.needs_review
+    assert len(ring.fired) >= 2, "flagging must rest on corroboration, not one number"
 
 
 def test_real_collaborators_cluster_but_are_not_flagged(known):
@@ -47,10 +48,11 @@ def test_real_collaborators_cluster_but_are_not_flagged(known):
     assert not group.needs_review
 
 
-def test_the_discriminator_is_insularity_not_clustering(known):
-    """Both groups cluster identically; only the outward edges differ."""
+def test_the_discriminator_is_corroboration_not_clustering(known):
+    """Both groups cluster identically; the signals that fire differ."""
     ring = find_clusters(sockpuppet_pool(), known)[0]
     real = find_clusters(genuine_pool(), known)[0]
+    assert len(ring.fired) > len(real.fired)
     assert ring.mean_insularity > real.mean_insularity * 3
 
 
@@ -180,3 +182,84 @@ def test_a_partially_applied_ring_is_still_caught(known):
     partial = {k: v for k, v in sockpuppet_pool().items() if k != "ring-d"}
     clusters = find_clusters(partial, known)
     assert clusters and clusters[0].needs_review
+
+
+# ------------------------------------------------------- external review
+#
+# Both independent reviewers broke the first design, from different angles.
+# These are their attacks, kept so the design cannot regress to a single
+# threshold on a single ratio.
+
+
+def _ring_with_decoys(n: int):
+    """A ring where each account buys cover with trivial recognised-org PRs."""
+    from tests.fixtures.profiles import _iso, _member
+
+    ring = ["ring-a", "ring-b", "ring-c", "ring-d"]
+    pool = {}
+    for i, h in enumerate(ring):
+        others = [o for o in ring if o != h]
+        merged = [(f"{others[0]}/sdk", 10 + i), (f"{others[1]}/tools", 20 + i)]
+        merged += [("celo-org/celo-composer", 900 + i * 10 + j) for j in range(n)]
+        pool[h] = _member(
+            h, merged=merged, reviews=[(f"{others[2]}/sdk", 30 + i)], created=_iso(2024, 6, 3 + i)
+        )
+    return pool
+
+
+def _co_founders():
+    """Two real people building one product together. Not a ring."""
+    from tests.fixtures.profiles import _iso, _member
+
+    names = ["ada-fnd", "kwame-fnd"]
+    pool = {}
+    for i, h in enumerate(names):
+        peer = names[1 - i]
+        pool[h] = _member(
+            h,
+            merged=[(f"{peer}/sdk", 50 + i), (f"{peer}/tools", 60 + i)],
+            reviews=[(f"{peer}/sdk", 70 + i)],
+            created=_iso(2018 + i, 3, 11),
+        )
+    return pool
+
+
+@pytest.mark.parametrize("decoys", [0, 1, 2, 3, 4])
+def test_cheap_decoy_contributions_no_longer_buy_cover(decoys, known):
+    """The evasion that beat the first design.
+
+    Two throwaway pull requests per account into a recognised org dropped
+    insularity from 1.00 to 0.60, under the old 0.75 threshold — and those same
+    PRs scored positively elsewhere in the rubric. Corroboration closes it:
+    buying down one signal leaves the others standing.
+    """
+    cluster = find_clusters(_ring_with_decoys(decoys), known)[0]
+    assert cluster.needs_review, f"{decoys} decoy PRs each defeated the check"
+
+
+def test_two_co_founders_are_never_flagged(known):
+    """The false positive that beat the first design.
+
+    Two people building one product together score maximum insularity —
+    identical to the canonical ring — because they validate only each other.
+    Groups this small are structurally indistinguishable from a two-account
+    ring, and defaming real co-founders is the more expensive error.
+    """
+    cluster = find_clusters(_co_founders(), known)[0]
+    assert cluster.size == 2
+    assert cluster.mean_insularity == 1.0  # the old rule would have flagged this
+    assert not cluster.needs_review
+
+
+def test_a_single_signal_is_never_enough(known):
+    """One threshold on one ratio failed in both directions; require two."""
+    for pool in (genuine_pool(), _co_founders()):
+        for cluster in find_clusters(pool, known):
+            if len(cluster.fired) < 2:
+                assert not cluster.needs_review
+
+
+def test_the_summary_names_the_signals_that_fired(known):
+    """A reviewer needs to know which observation to go and check."""
+    summary = find_clusters(sockpuppet_pool(), known)[0].summary()
+    assert "created within" in summary or "possible pairs" in summary

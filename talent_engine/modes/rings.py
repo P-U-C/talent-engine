@@ -28,14 +28,33 @@ from typing import Iterable
 
 from ..model import ProfileSnapshot
 
-# A cluster smaller than this is two people who know each other, which is not
-# a finding.
+# Clusters below this size are reported but never flagged for review. Two
+# people who validate only each other is the normal shape of a founding team
+# building one product together, and it is indistinguishable from a two-account
+# ring on structure alone. Flagging pairs would defame co-founders constantly
+# to catch the cheapest possible ring, which is the wrong trade: the cost of
+# calling real people fraudulent is far higher than the cost of missing a
+# two-account operation.
 MIN_CLUSTER = 2
+MIN_FLAGGABLE_CLUSTER = 3
 
-# Above this share of intra-cluster validation, the cluster is worth a human
-# look. Chosen to sit above what genuine collaborators produce in the fixtures
-# and below what a ring produces; it is a review threshold, never a rejection.
 INSULARITY_REVIEW = 0.75
+DENSITY_REVIEW = 0.8          # share of possible member-to-member edges present
+SYNCHRONISED_DAYS = 45        # accounts stood up together
+THIN_OUTSIDE_MAX = 2          # median independent validations per member
+
+# How many independent signals must fire. One is not enough: a single
+# threshold on a single ratio was the first design, and it failed in both
+# directions — two throwaway pull requests per account dropped a real ring
+# under the line, while two genuine co-founders sat at the maximum.
+SIGNALS_FOR_REVIEW = 2
+
+
+@dataclass
+class Signal:
+    key: str
+    fired: bool
+    detail: str
 
 
 @dataclass
@@ -57,6 +76,7 @@ class Cluster:
     edges: list[Edge]
     insularity: dict[str, float] = field(default_factory=dict)
     created_within_days: int | None = None
+    signals: list[Signal] = field(default_factory=list)
 
     @property
     def size(self) -> int:
@@ -69,8 +89,21 @@ class Cluster:
         return sum(self.insularity.values()) / len(self.insularity)
 
     @property
+    def fired(self) -> list[Signal]:
+        return [s for s in self.signals if s.fired]
+
+    @property
     def needs_review(self) -> bool:
-        return self.size >= MIN_CLUSTER and self.mean_insularity >= INSULARITY_REVIEW
+        """Corroboration, not a single threshold.
+
+        Requires a cluster large enough that its shape is not just a founding
+        team, plus at least two independent signals agreeing. Any one of these
+        alone is either evadable or produces false positives on real people.
+        """
+        return (
+            self.size >= MIN_FLAGGABLE_CLUSTER
+            and len(self.fired) >= SIGNALS_FOR_REVIEW
+        )
 
     def to_dict(self) -> dict:
         return {
@@ -80,6 +113,9 @@ class Cluster:
             "insularity": {k: round(v, 3) for k, v in self.insularity.items()},
             "created_within_days": self.created_within_days,
             "needs_review": self.needs_review,
+            "signals": [
+                {"key": s.key, "fired": s.fired, "detail": s.detail} for s in self.signals
+            ],
             "edges": [
                 {"from": e.source, "to": e.target, "kind": e.kind, "detail": e.detail}
                 for e in self.edges
@@ -89,18 +125,11 @@ class Cluster:
     def summary(self) -> str:
         """One paragraph for a human. States the observation, not a verdict."""
         who = ", ".join(self.members)
-        pct = f"{self.mean_insularity:.0%}"
-        lines = [
-            f"{self.size} applicants are connected: {who}.",
-            f"{pct} of their merged work went to each other or to accounts "
-            "this program does not recognise — not to projects whose review "
-            "bar means something independently.",
-        ]
-        if self.created_within_days is not None and self.created_within_days <= 30:
-            lines.append(
-                f"Their accounts were created within {self.created_within_days} "
-                "days of one another."
-            )
+        lines = [f"{self.size} applicants are connected: {who}."]
+        for s in self.fired:
+            lines.append(s.detail)
+        if not self.fired:
+            lines.append("Nothing about the group's shape stands out.")
         lines.append(
             "This is consistent with people who work together, and also with "
             "one person running several accounts. It is not evidence of either. "
@@ -231,6 +260,103 @@ def _insularity(
     return not_independent / len(outside_targets)
 
 
+def _density(members: list[str], edges: list[Edge]) -> float:
+    """Share of possible member-to-member pairs that are actually linked.
+
+    A ring needs everyone to validate everyone, or the accounts are wasted.
+    Real collaboration is sparser and lopsided: people work with the one or two
+    others whose project they touch, not with the whole group uniformly.
+    """
+    n = len(members)
+    if n < 2:
+        return 0.0
+    pairs = {tuple(sorted((e.source, e.target))) for e in edges if e.source != e.target}
+    return len(pairs) / (n * (n - 1) / 2)
+
+
+def _outside_counts(
+    members: list[str], snapshots: dict[str, ProfileSnapshot], recognised: set[str]
+) -> list[int]:
+    """Per member, how many validations came from a recognised outside project."""
+    lowered = {m.lower() for m in members}
+    known = {o.lower() for o in recognised}
+    counts = []
+    for m in members:
+        snap = snapshots.get(m)
+        if snap is None:
+            continue
+        n = 0
+        for item in list(snap.merged_prs) + list(snap.reviews):
+            owner = _owner(item.repo)
+            if owner and owner != m.lower() and owner not in lowered and owner in known:
+                n += 1
+        counts.append(n)
+    return counts
+
+
+def _signals(
+    cluster: "Cluster",
+    snapshots: dict[str, ProfileSnapshot],
+    recognised: set[str],
+) -> list[Signal]:
+    """Independent observations about the group's shape.
+
+    Each is individually weak and individually evadable. The point is that
+    evading all of them costs real work — an attacker who builds genuine
+    outside track records on several accounts, spaced apart in time, with
+    asymmetric collaboration, has done most of the work of being real.
+    """
+    out: list[Signal] = []
+
+    insular = cluster.mean_insularity >= INSULARITY_REVIEW
+    out.append(
+        Signal(
+            "insular",
+            insular,
+            f"{cluster.mean_insularity:.0%} of their merged work went to each other "
+            "or to accounts this program does not recognise.",
+        )
+    )
+
+    density = _density(cluster.members, cluster.edges)
+    out.append(
+        Signal(
+            "dense",
+            density >= DENSITY_REVIEW,
+            f"{density:.0%} of the possible pairs in the group are linked — nearly "
+            "everyone validates nearly everyone, which is not how collaboration "
+            "usually distributes.",
+        )
+    )
+
+    synced = (
+        cluster.created_within_days is not None
+        and cluster.created_within_days <= SYNCHRONISED_DAYS
+    )
+    out.append(
+        Signal(
+            "synchronised_accounts",
+            synced,
+            f"Their accounts were created within {cluster.created_within_days} days "
+            "of one another."
+            if cluster.created_within_days is not None
+            else "Account creation dates unavailable.",
+        )
+    )
+
+    counts = _outside_counts(cluster.members, snapshots, recognised)
+    median = sorted(counts)[len(counts) // 2] if counts else 0
+    out.append(
+        Signal(
+            "thin_outside",
+            bool(counts) and median <= THIN_OUTSIDE_MAX,
+            f"The median member has {median} accepted contribution(s) to a project "
+            "this program recognises.",
+        )
+    )
+    return out
+
+
 def _creation_spread(members: list[str], snapshots: dict[str, ProfileSnapshot]) -> int | None:
     dates = [
         snapshots[m].account_created_at
@@ -275,10 +401,11 @@ def find_clusters(
             if m in snapshots
         }
         cluster.created_within_days = _creation_spread(members, snapshots)
+        cluster.signals = _signals(cluster, snapshots, recognised_orgs or set())
         clusters.append(cluster)
 
     # Most inward-facing first: that is the order a reviewer should read them.
-    clusters.sort(key=lambda c: (-c.mean_insularity, -c.size))
+    clusters.sort(key=lambda c: (-len(c.fired), -c.mean_insularity, -c.size))
     return clusters
 
 
@@ -294,6 +421,15 @@ def report(clusters: list[Cluster]) -> str:
     for c in clusters:
         marker = "REVIEW" if c.needs_review else "note  "
         out.append(f"[{marker}] {c.summary()}")
+        if c.size < MIN_FLAGGABLE_CLUSTER:
+            out.append(
+                "         (groups this small are never flagged: two people who "
+                "validate only each other is the normal shape of a founding team)"
+            )
+        out.append(
+            "         signals: "
+            + ", ".join(f"{s.key}={'yes' if s.fired else 'no'}" for s in c.signals)
+        )
         kinds: dict[str, int] = {}
         for e in c.edges:
             kinds[e.kind] = kinds.get(e.kind, 0) + 1

@@ -261,24 +261,67 @@ their own cluster or to accounts the program does not recognise, rather than to
 projects whose review bar means something independently. A real community has
 edges pointing outward; a ring, by construction, mostly does not.
 
-Measured on the fixtures:
+### Two independent reviews broke the first design
 
-| pool | clusters | insularity | flagged |
+A single threshold on insularity failed in **both** directions, and two
+external reviewers found it from different angles.
+
+**Evasion.** Two throwaway pull requests per account into a recognised project
+dropped a four-account ring from 1.00 to 0.60 — under the 0.75 line — and those
+same pull requests scored *positively* elsewhere in the rubric. The attack cost
+roughly ten minutes per account.
+
+**False positive.** Two people building one product together score insularity
+1.00, identical to the canonical ring, because they validate only each other.
+The first design would have flagged every founding team in the pool.
+
+Neither is fixable by moving the threshold: they sit on opposite sides of it.
+
+### What replaced it: corroboration
+
+Four independent signals, each individually weak and individually evadable:
+
+| signal | what it observes |
+|---|---|
+| `insular` | merged work went to the cluster or to unrecognised accounts |
+| `dense` | nearly every possible pair in the group is linked |
+| `synchronised_accounts` | the accounts were created within 45 days of each other |
+| `thin_outside` | the median member has ≤2 accepted contributions to a recognised project |
+
+A cluster is flagged when it has **at least three members** and **at least two
+signals fire**. Groups of two are reported and never flagged: a pair that
+validates only each other is the normal shape of a founding team and is
+structurally indistinguishable from a two-account ring, and defaming real
+co-founders is the more expensive error.
+
+Measured:
+
+| pool | size | signals fired | flagged |
 |---|---|---|---|
-| `sockpuppet_pool` (4 accounts, one operator) | yes | 1.00 | **review** |
-| `sockpuppet_pool` minus one member | yes | 1.00 | **review** |
-| `genuine_pool` (3 real collaborators) | yes | 0.29 | no |
+| ring, no cover | 4 | insular, dense, synchronised, thin | **review** |
+| ring + 2 decoy PRs each *(beat the old design)* | 4 | dense, synchronised, thin | **review** |
+| ring + 4 decoy PRs each | 4 | dense, synchronised | **review** |
+| two real co-founders *(beat the old design)* | 2 | insular, dense, thin | no |
+| three real collaborators | 3 | dense | no |
 
-Both cluster. Only one is flagged.
+Buying down one signal leaves the others standing. Evading all four means
+building genuine outside track records on several accounts, spaced apart in
+time, with asymmetric collaboration — which is most of the work of being real.
 
-### The hole the first version had
+### The earlier hole, kept for the record
 
-The obvious metric — share of validation staying inside the cluster — broke
-the first time a *partially applied* ring was tested. With three of four
-accounts scored, each member's edge to the absent fourth counted as outside
-validation and the group fell under the threshold. A check a ring defeats by
-withholding one account is not a check. Hence the current definition, where an
-unrecognised account is not independent evidence whether or not it has applied.
+The first metric counted an edge to a ring member who had not yet applied as
+*outside* validation, so withholding one account dropped the group under the
+line. An unrecognised account is now not independent evidence whether or not it
+has applied.
+
+### Known limits
+
+- **Arrival order.** The check runs when someone applies, so only the person
+  who completes a cluster gets the note; earlier members' stored caveats are
+  not retroactively updated. `talent-engine rings` is the canonical view and
+  should be run before any selection meeting.
+- A ring whose members have **not applied** is invisible: this reads the pool.
 
 ### What it still cannot see
 

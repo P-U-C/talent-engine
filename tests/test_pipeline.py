@@ -102,7 +102,9 @@ def test_snapshot_digest_changes_when_inputs_change():
     [
         ("octocat", "octocat"),
         ("@octocat", "octocat"),
-        ("  OctoCat  ", "OctoCat"),
+        # Lower-cased: GitHub logins are case-insensitive, and preserving
+        # case let one person hold two rows through to cohort selection.
+        ("  OctoCat  ", "octocat"),
         ("github.com/octocat", "octocat"),
         ("https://github.com/octocat", "octocat"),
         ("https://github.com/octocat/", "octocat"),

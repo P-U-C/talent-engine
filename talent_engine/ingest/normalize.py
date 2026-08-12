@@ -46,7 +46,12 @@ def normalize_handle(raw: str) -> str | None:
     if "?" in value:
         value = value.split("?", 1)[0]
 
-    return value if _HANDLE_RE.match(value) else None
+    if not _HANDLE_RE.match(value):
+        return None
+    # GitHub logins are case-insensitive: Octocat and octocat are one account.
+    # Without this, the same person occupies two independent rows all the way
+    # through to cohort selection, which allocates funded seats.
+    return value.lower()
 
 
 def _first(row: dict[str, str], keys: tuple[str, ...]) -> str:

@@ -125,6 +125,15 @@ class Collector:
             if pushed and pushed < since:
                 break
 
+        # Publish the list BEFORE enrichment. This assignment used to be the
+        # last line of the function, so a BudgetExhausted raised while fetching
+        # commits or releases discarded every repository already collected —
+        # a real builder with active, described projects scored 0.0 with only a
+        # soft partial_data flag, indistinguishable from someone with no public
+        # work at all. Enrichment failing should cost the enrichment, not the
+        # evidence.
+        snap.repos = repos
+
         in_window = [
             r
             for r in repos
@@ -140,11 +149,7 @@ class Collector:
 
         for repo in sample:
             self._collect_commits(snap, repo, since)
-            if repo.has_description or repo.topics:
-                pass
             repo.has_releases = self._has_releases(repo.name)
-
-        snap.repos = repos
 
     def _collect_commits(
         self, snap: ProfileSnapshot, repo: RepoActivity, since: datetime

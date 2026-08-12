@@ -623,3 +623,85 @@ def test_a_repeatedly_failing_submission_is_eventually_parked(tmp_path):
     store = Store(service.db_path)
     assert store.get_submission("sub_1")["status"] == "error"
     store.close()
+
+
+def test_a_budget_exhausted_snapshot_is_not_scored(tmp_path):
+    """An incomplete collection is a floor, not a measurement.
+
+    Scoring it would put a misleadingly low number in front of a human with
+    only a soft flag to contradict it. It stays retryable instead.
+    """
+    cfg = load_program("celo-trial")
+
+    class Starved:
+        def collect(self, handle, application):
+            now = utc_now_iso()
+            snap = ProfileSnapshot(
+                handle=handle,
+                account_created_at="2020-01-01T00:00:00Z",
+                collected_at=now,
+                window_start="2026-02-12T00:00:00Z",
+                window_end=now,
+                application=application,
+            )
+            snap.partial = True
+            snap.collection_notes.append("request budget exhausted: ran out")
+            return snap
+
+    service = IntakeService(cfg, str(tmp_path / "t.db"), collector_factory=lambda: Starved())
+    service.start()
+    service.accept(parse_webhook(payload([f("GitHub", "octocat")])))
+    service.stop(drain=True)
+
+    store = Store(service.db_path)
+    row = store.get_submission("sub_1")
+    assert row["status"] == "queued"          # retryable, not a bad score
+    assert row["total"] is None
+    assert "budget" in row["error"]
+    store.close()
+
+
+def test_each_submission_gets_a_fresh_collector(tmp_path):
+    """The client's request budget is finite; reusing one exhausts it."""
+    cfg = load_program("celo-trial")
+    built = []
+
+    def factory():
+        collector = FakeCollector()
+        built.append(collector)
+        return collector
+
+    service = IntakeService(cfg, str(tmp_path / "t.db"), collector_factory=factory)
+    service.start()
+    for i in range(3):
+        service.accept(parse_webhook(payload([f("GitHub", "octocat")], submission_id=f"s{i}")))
+    service.stop(drain=True)
+
+    assert len(built) == 3, "a collector, and therefore a budget, per submission"
+
+
+def test_handles_are_case_normalised():
+    """GitHub logins are case-insensitive; two rows for one person reach the
+    cohort table, which allocates funded seats."""
+    from talent_engine.ingest.normalize import normalize_handle
+
+    assert normalize_handle("OctoCat") == "octocat"
+    assert normalize_handle("https://github.com/OctoCat/") == "octocat"
+    assert normalize_handle("@OCTOCAT") == "octocat"
+
+
+def test_the_same_person_in_different_case_is_one_submission(live):
+    """Two spellings, one identity, one score — not two shots at a seat."""
+    url, service, collector = live
+    for i, spelling in enumerate(["OctoCat", "octocat", "OCTOCAT"]):
+        body = json.dumps(
+            payload([f("GitHub", spelling)], submission_id=f"case_{i}")
+        ).encode()
+        assert post(url, body, sign(body))[0] == 202
+
+    service.stop(drain=True)
+    assert collector.collected == ["octocat", "octocat", "octocat"]
+    store = Store(service.db_path)
+    handles = {r["handle"] for r in store.submissions("celo-trial", limit=10)}
+    assert handles == {"octocat"}
+    store.close()

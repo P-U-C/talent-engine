@@ -154,7 +154,6 @@ class IntakeService:
 
     def _run(self) -> None:
         self._store = Store(self.db_path)  # must be opened on this thread
-        collector: Collector | None = None
         try:
             while True:
                 item = self._q.get()
@@ -162,9 +161,13 @@ class IntakeService:
                     self._q.task_done()
                     return
                 try:
-                    if collector is None:
-                        collector = self.collector_factory()
-                    self._score_one(item, collector)
+                    # A fresh collector per submission. The client carries a
+                    # finite request budget, and reusing one across the
+                    # service's whole uptime meant that after enough applicants
+                    # the budget was spent and every subsequent person scored
+                    # near zero — silently, permanently, until somebody thought
+                    # to restart the service.
+                    self._score_one(item, self.collector_factory())
                 except Exception as exc:  # a bad applicant must not kill intake
                     log.exception("scoring %s failed", item)
                     # A transient failure — GitHub down, token expired, rate
@@ -204,6 +207,15 @@ class IntakeService:
         run_id = self._run_for_today()
         snap = collector.collect(row["handle"], app)
         self._store.save_snapshot(snap)
+        if snap.partial and any("budget" in n for n in snap.collection_notes):
+            # An incomplete snapshot is a floor, not a measurement. Recording
+            # it as a score would put a misleadingly low number in front of a
+            # human with only a soft flag to contradict it.
+            raise RuntimeError(
+                "collection incomplete (request budget exhausted); not scoring a "
+                "partial snapshot"
+            )
+
         score = score_snapshot(snap, self.cfg)
         self._store.save_score(run_id, score)
         caveat = concerns(score, self.cfg, snap)
