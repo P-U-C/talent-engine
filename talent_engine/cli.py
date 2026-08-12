@@ -219,6 +219,70 @@ def cmd_dossier(args) -> int:
     return 0
 
 
+def cmd_accept(args) -> int:
+    """Record an acceptance and produce the letter. Deploys nothing."""
+    from .modes.acceptance import acceptance_letter, split_plan
+    from .programs.policy import load_overlay
+
+    cfg = load_program(args.program)
+    overlay = load_overlay(args.overlay or args.program)
+    store = Store(args.db)
+
+    handle = normalize_handle(args.handle) or args.handle
+    if not any(m["handle"] == handle for m in store.cohort(cfg.key)):
+        if not args.select:
+            print(
+                f"{handle} is not in the {cfg.key} cohort. Selection is a human "
+                "decision; pass --select to record it here at the same time.",
+                file=sys.stderr,
+            )
+            store.close()
+            return 2
+        store.select_cohort(cfg.key, [handle], baseline_run_id=args.baseline or "")
+
+    ok = store.record_acceptance(
+        cfg.key,
+        handle,
+        split_address=args.split_address or "",
+        attestation_uid=args.attestation_uid or "",
+    )
+    if not ok:
+        print(f"could not record acceptance for {handle}", file=sys.stderr)
+        store.close()
+        return 1
+
+    plan = split_plan(overlay, dict(os.environ))
+    if not args.split_address:
+        print("--- split to create -------------------------------------------")
+        print(plan.render())
+        if not plan.resolved:
+            print(
+                "\nSome recipient addresses are unset; export them before creating "
+                "the split.",
+                file=sys.stderr,
+            )
+        print()
+
+    score_row = None
+    for row in store.submissions(cfg.key, limit=500):
+        if row["handle"] == handle and row["status"] == "scored":
+            score_row = row
+            break
+
+    print("--- acceptance letter -----------------------------------------")
+    print(
+        acceptance_letter(
+            handle,
+            overlay,
+            split_address=args.split_address or "",
+            score=score_row["total"] if score_row else None,
+            caveat=score_row["concerns"] if score_row else "",
+        )
+    )
+    store.close()
+    return 0
+
+
 def cmd_rings(args) -> int:
     from .modes.rings import find_clusters, report
 
@@ -373,6 +437,20 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("runs")
     s.add_argument("--program")
     s.set_defaults(func=cmd_runs)
+
+    s = sub.add_parser("accept", help="record an acceptance and print the letter")
+    s.add_argument("--program", required=True)
+    s.add_argument("--handle", required=True)
+    s.add_argument("--overlay", help="policy key, if it differs from --program")
+    s.add_argument("--split-address", help="the 0xSplits address, once it exists")
+    s.add_argument("--attestation-uid", help="the signed pledge attestation")
+    s.add_argument("--baseline", help="run id to measure this person against later")
+    s.add_argument(
+        "--select",
+        action="store_true",
+        help="also add them to the cohort (selection is otherwise a separate decision)",
+    )
+    s.set_defaults(func=cmd_accept)
 
     s = sub.add_parser(
         "rings", help="relationships between applicants (needs a pool, not one profile)"

@@ -67,6 +67,14 @@ CREATE TABLE IF NOT EXISTS cohort (
     declared_repo TEXT DEFAULT '',
     baseline_run_id TEXT DEFAULT '',
     selected_at TEXT NOT NULL,
+    -- Acceptance artefacts. The split address and attestation UID are the two
+    -- public objects the terms depend on, so they live next to the cohort row
+    -- rather than in someone's notes: `monitor` and `measure` need to reach
+    -- them, and so does anyone auditing what was actually agreed.
+    accepted_at TEXT DEFAULT '',
+    split_address TEXT DEFAULT '',
+    attestation_uid TEXT DEFAULT '',
+    months_received INTEGER DEFAULT 0,
     PRIMARY KEY (program, handle)
 );
 CREATE INDEX IF NOT EXISTS idx_scores_handle ON scores(handle);
@@ -267,6 +275,44 @@ class Store:
                 (program, h, declared_repos.get(h, ""), baseline_run_id, utc_now_iso()),
             )
         self.conn.commit()
+
+    def record_acceptance(
+        self,
+        program: str,
+        handle: str,
+        *,
+        split_address: str = "",
+        attestation_uid: str = "",
+        months_received: int | None = None,
+    ) -> bool:
+        """Attach acceptance artefacts to an existing cohort row.
+
+        Returns False if the handle is not in the cohort — accepting someone
+        who was never selected should fail loudly rather than create a row
+        that no selection decision stands behind.
+        """
+        row = self.conn.execute(
+            "SELECT 1 FROM cohort WHERE program = ? AND handle = ?", (program, handle)
+        ).fetchone()
+        if not row:
+            return False
+        sets, params = ["accepted_at = ?"], [utc_now_iso()]
+        if split_address:
+            sets.append("split_address = ?")
+            params.append(split_address)
+        if attestation_uid:
+            sets.append("attestation_uid = ?")
+            params.append(attestation_uid)
+        if months_received is not None:
+            sets.append("months_received = ?")
+            params.append(months_received)
+        params += [program, handle]
+        self.conn.execute(
+            f"UPDATE cohort SET {', '.join(sets)} WHERE program = ? AND handle = ?",
+            params,
+        )
+        self.conn.commit()
+        return True
 
     def cohort(self, program: str) -> list[dict[str, Any]]:
         rows = self.conn.execute(
