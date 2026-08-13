@@ -319,3 +319,55 @@ def test_reviews_from_one_owner_are_not_many_relationships(cfg):
     dim = score(snap, cfg).dimension("collaboration")
     assert dim.components["distinct_owners"] == 1.0
     assert dim.components["effective"] < dim.components["distinct_repos"]
+
+
+# ------------------------------------------- independence and shortlist bands
+
+def test_a_merged_pr_into_a_repo_with_no_other_contributors_is_discounted(cfg):
+    """`is_own_repo` only means "not this account"; an alt defeats it for free."""
+    snap = metadata_maximiser()
+    _with_trivial_outside_work(snap)
+    full = score(snap, cfg).dimension("external_validation").points
+    for pr in snap.merged_prs:
+        pr.independent_target = False
+    alt_owned = score(snap, cfg).dimension("external_validation").points
+    assert alt_owned < full
+
+
+def test_an_unknown_target_keeps_full_weight(cfg):
+    """A rate limit is our failure, not the applicant's."""
+    snap = metadata_maximiser()
+    _with_trivial_outside_work(snap)
+    full = score(snap, cfg).dimension("external_validation").points
+    for pr in snap.merged_prs:
+        pr.independent_target = None
+    assert score(snap, cfg).dimension("external_validation").points == full
+
+
+def test_scores_within_the_noise_margin_share_a_band(cfg):
+    """Rank order must stop implying a precision the engine does not have."""
+    from talent_engine.report import MATERIAL_MARGIN, bands, ranked_table
+    from talent_engine.scoring.engine import rank
+
+    scored = [
+        score(f(), cfg)
+        for f in (genuine_builder, quiet_finisher, patient_farmer, sockpuppet_ring)
+    ]
+    ordered = rank(scored)
+    for group in bands(ordered):
+        assert group[0].total - group[-1].total <= MATERIAL_MARGIN
+
+    table = ranked_table(ordered)
+    assert "band" in table
+    # Two candidates one point apart must not be printed as 3rd and 4th.
+    assert "#" not in table.splitlines()[0]
+
+
+def test_bands_do_not_collapse_candidates_sharing_a_handle(cfg):
+    """Two fixtures use `steady-sam`; a handle-keyed lookup merged their bands."""
+    from talent_engine.report import ranked_table
+    from talent_engine.scoring.engine import rank
+
+    scored = [score(f(), cfg) for f in (patient_farmer, sockpuppet_ring)]
+    lines = ranked_table(rank(scored)).splitlines()[2:4]
+    assert lines[0].split()[0] != lines[1].split()[0]

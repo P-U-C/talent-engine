@@ -333,6 +333,43 @@ class Collector:
                 )
             )
 
+        # Establish independence once per distinct target, not once per PR.
+        seen: dict[str, bool | None] = {}
+        for pr in snap.merged_prs:
+            if pr.is_own_repo:
+                continue
+            key = pr.repo.lower()
+            if key not in seen:
+                seen[key] = self._target_is_independent(pr.repo, snap.handle)
+            pr.independent_target = seen[key]
+
+    def _target_is_independent(self, full_name: str, handle: str) -> bool | None:
+        """Did this repository exist as somebody else's project?
+
+        `is_own_repo` only asks whether the owner string differs from the
+        applicant's handle, which an alt account or a self-made organisation
+        defeats for free -- and a two-account cluster sits below the ring
+        detector's flagging threshold, so nothing else catches it either.
+
+        The cheap discriminator is other people. A project with contributors
+        besides the applicant had a review bar that somebody else maintained.
+        Returns `None` when the question cannot be answered (rate limit,
+        permissions, deleted repo) so that a collection failure reads as
+        "unknown" rather than as an accusation.
+        """
+        contributors = self.client.get(
+            f"/repos/{full_name}/contributors", {"per_page": 5, "anon": "false"}
+        )
+        if not isinstance(contributors, list) or not contributors:
+            return None
+        logins = {
+            (c.get("login") or "").lower() for c in contributors if isinstance(c, dict)
+        }
+        logins.discard("")
+        if not logins:
+            return None
+        return bool(logins - {handle.lower()})
+
     def _collect_reviews(self, snap: ProfileSnapshot, since: datetime) -> None:
         query = (
             f"is:pr reviewed-by:{snap.handle} -author:{snap.handle} "

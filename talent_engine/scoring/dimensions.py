@@ -55,6 +55,13 @@ HALF_FRONTIER_HITS = 2.0  # frontier work is rarer, so it saturates sooner
 # repo is largely a function of already being inside it.
 REPEAT_REPO_WEIGHT = 0.25
 
+# Weight of a merged PR into a repository with no contributors other than the
+# applicant. Not zero: a genuinely new project by a genuinely new maintainer
+# looks exactly like this, and so does a first contribution to somebody's
+# weekend tool. It just is not the "someone else's review bar" signal this
+# dimension claims to measure.
+DEPENDENT_TARGET_WEIGHT = 0.3
+
 # Fraction of the window's weeks that must show activity for full cadence marks.
 CADENCE_TARGET_FRACTION = 0.5
 
@@ -329,6 +336,20 @@ def external_validation(
         effective = min(effective, len(distinct_owners) + REPEAT_REPO_WEIGHT * (
             len(distinct_repos) - len(distinct_owners)
         ))
+
+    # Independence of the target, where collection could establish it. A repo
+    # with contributors other than the applicant had a review bar somebody else
+    # maintained; one without is indistinguishable from an alt account's shell.
+    # Repos we could not check (`None`) keep full weight -- a rate limit is our
+    # failure, not the applicant's, and `partial_data` already says so.
+    checked = {
+        pr.repo.lower(): pr.independent_target
+        for pr in external
+        if pr.independent_target is not None
+    }
+    if checked:
+        dependent = sum(1 for ok in checked.values() if not ok)
+        effective = max(0.0, effective - dependent * (1.0 - DEPENDENT_TARGET_WEIGHT))
     frac = saturate(effective, HALF_EXTERNAL_PRS)
     evidence = [
         Evidence(claim=f"merged PR: {pr.repo}#{pr.number} {pr.title}"[:200], url=pr.url)

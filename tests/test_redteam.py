@@ -28,9 +28,20 @@ from tests.fixtures.profiles import (
 )
 
 
-@pytest.fixture
-def cfg():
-    return load_program("recruit-agent-infra")
+# Every red-team result in docs/STRATEGY.md was measured on
+# `recruit-agent-infra` while the programme actually handing out money is
+# `prezenti-sponsorship-trial` -- which is the more farmable of the two, since
+# it puts 85 of 100 points on dimensions a single account can move (shipping
+# 40, consistency 20, ecosystem 10, frontier 15) and only 15 on external
+# validation and collaboration. Benchmarking the config you do not ship is how
+# you end up confident about the wrong thing, so every check below now runs
+# against both.
+SCORED_PROGRAMS = ["recruit-agent-infra", "prezenti-sponsorship-trial"]
+
+
+@pytest.fixture(params=SCORED_PROGRAMS, ids=SCORED_PROGRAMS)
+def cfg(request):
+    return load_program(request.param)
 
 
 @pytest.fixture
@@ -134,32 +145,58 @@ def test_sockpuppet_prs_are_scored_as_independent_validation(cfg):
     assert dims["collaboration"].points > 0
 
 
-def test_the_sockpuppet_ring_outranks_every_real_profile(cfg):
-    """The headline result: the full attack wins outright.
+def test_where_the_sockpuppet_ring_still_wins_and_where_it_no_longer_does(cfg):
+    """The headline result, and it is now different on each config.
 
-    Priced out, it is four throwaway accounts, a scheduled committer, and an
-    afternoon of repository metadata. No reviewed code, no users, no
-    independent reviewer — and on `recruit-agent-infra` it tops the board:
+    Priced out, the ring is four throwaway accounts, a scheduled committer and
+    an afternoon of repository metadata. No reviewed code, no users, no
+    independent reviewer. It used to top the board outright:
 
         sockpuppet_ring      56.79
-        genuine_builder      49.93
+        genuine_builder      49.93   <- and this was the only flagged one
         patient_farmer       41.36
-        quiet_finisher       29.43
-        insider_low_shipper  23.94
-        gamed_profile         4.68
 
-    Only the last of those is caught, and it is the one attack nobody
-    sophisticated would run.
+    Where it now stands, after the taxonomy, owner-counting, completeness and
+    cadence countermeasures:
+
+        prezenti-sponsorship-trial      recruit-agent-infra
+        67.63 genuine_builder  clean    59.00 sockpuppet_ring   flagged
+        63.32 sockpuppet_ring  flagged  54.01 genuine_builder   clean
+        59.79 metadata_maximiser flagged 44.75 patient_farmer   flagged
+
+    On the live programme the genuine builder now leads, and every
+    manufactured profile is both beneath it and flagged. On the recruitment
+    config the ring still wins, and the reason is that config's own shape
+    rather than a missing check: it puts 27 of 100 points on
+    `external_validation` + `collaboration`, which is precisely what a ring
+    farms. That is a weighting decision for whoever runs a recruitment
+    programme, and it is why this test now runs against both.
+
+    The ring being flagged rather than beaten is the honest state. A reviewer
+    reading top-down sees it; the score alone does not stop it.
     """
     ring = score(sockpuppet_ring(), cfg)
-    others = {
-        "genuine_builder": score(genuine_builder(), cfg).total,
-        "quiet_finisher": score(quiet_finisher(), cfg).total,
-    }
-    assert all(ring.total > t for t in others.values()), (
-        f"ring={ring.total:.2f} vs {others} — if the ring no longer wins, a "
-        "countermeasure landed and this test should record which"
+    genuine = score(genuine_builder(), cfg)
+    insider_weight = cfg.max_points("external_validation") + cfg.max_points(
+        "collaboration"
     )
+
+    # Whichever config, the ring must never look clean to a human.
+    assert "unverified_cadence" in {f.key for f in ring.flags}, (
+        "the ring is unflagged again — the cadence countermeasure regressed"
+    )
+
+    if insider_weight >= 25:
+        assert ring.total > genuine.total, (
+            f"ring={ring.total:.2f} genuine={genuine.total:.2f}: the ring no "
+            "longer wins on an insider-weighted config, which is a real "
+            "improvement — record which countermeasure did it"
+        )
+    else:
+        assert genuine.total > ring.total, (
+            f"ring={ring.total:.2f} beats genuine={genuine.total:.2f} on the "
+            "live programme — a countermeasure regressed"
+        )
 
 
 def test_declaring_a_referrer_is_no_longer_the_loudest_signal(cfg):

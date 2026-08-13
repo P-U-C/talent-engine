@@ -258,6 +258,13 @@ class PullRequestActivity:
     merged_at: str | None
     created_at: str | None
     is_own_repo: bool = False
+    # Whether the target repository looks like a project that existed
+    # independently of this applicant. `is_own_repo` only means "not this
+    # account", so a repository belonging to an alt reads as an independent
+    # maintainer clearing a review bar. Set during collection, where the
+    # network is; `None` means we could not establish it either way and the
+    # PR is treated as uncorroborated rather than as suspicious.
+    independent_target: bool | None = None
 
     @property
     def url(self) -> str:

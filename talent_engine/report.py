@@ -20,20 +20,62 @@ from .scoring.concerns import concerns
 SEVERITY_MARK = {"critical": "!!", "warn": " !", "review": " ?"}
 
 
+# Scores closer together than this are not distinguishable by this engine.
+# Adversarial review put a manufactured profile within a point of a genuine
+# builder, and collection itself varies by more than that -- a sampled repo, a
+# rate limit, a PR merged the morning after. Printing 3rd and 4th as though the
+# order meant something is the single easiest way for a reviewer to mistake a
+# number for a judgement.
+MATERIAL_MARGIN = 3.0
+
+
+def bands(scores: Iterable[CandidateScore], margin: float = MATERIAL_MARGIN):
+    """Group a ranked list into ties, widest-first.
+
+    A new band starts only when the score drops more than `margin` below the
+    band's own top. Within a band the ordering is arbitrary and should be
+    presented that way.
+    """
+    grouped: list[list[CandidateScore]] = []
+    for s in scores:
+        if grouped and (grouped[-1][0].total - s.total) <= margin:
+            grouped[-1].append(s)
+        else:
+            grouped.append([s])
+    return grouped
+
+
 def ranked_table(scores: Iterable[CandidateScore], *, limit: int | None = None) -> str:
     rows = list(scores)[: limit or None]
     if not rows:
         return "(no candidates)"
     width = max(len(s.handle) for s in rows)
-    out = [f"{'#':>3}  {'handle':<{width}}  {'total':>6}  {'auto':>5}  {'app':>5}  flags"]
+    grouped = bands(rows)
+    # Keyed by position, not by handle: two candidates can carry the same
+    # handle (the fixtures do), and a dict keyed on it silently merges them
+    # into one band.
+    band_of: list[int] = []
+    for i, g in enumerate(grouped, 1):
+        band_of.extend([i] * len(g))
+    out = [
+        f"{'band':>4}  {'handle':<{width}}  {'total':>6}  {'auto':>5}  {'app':>5}  flags"
+    ]
     out.append("-" * (len(out[0]) + 8))
-    for i, s in enumerate(rows, 1):
+    for pos, s in enumerate(rows):
         flags = ", ".join(
             f"{SEVERITY_MARK.get(f.severity, '')}{f.key}".strip() for f in s.flags
         )
         out.append(
-            f"{i:>3}  {s.handle:<{width}}  {s.total:>6.2f}  "
+            f"{band_of[pos]:>4}  {s.handle:<{width}}  {s.total:>6.2f}  "
             f"{s.automated_total:>5.1f}  {s.application_total:>5.1f}  {flags or '-'}"
+        )
+    ties = sum(1 for g in grouped if len(g) > 1)
+    if ties:
+        out.append("")
+        out.append(
+            f"Rows sharing a band are within {MATERIAL_MARGIN:g} points and this "
+            "engine cannot tell them apart. Read their dossiers; do not read the "
+            "order."
         )
     return "\n".join(out)
 
