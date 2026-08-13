@@ -94,6 +94,7 @@ def test_every_declared_mapping_actually_resolves(spec):
         "application.context_statement": app.context_statement,
         "application.referrer_name": app.referrer_name,
         "application.context_factors": app.context_factors,
+        "application.accepted_terms_version": app.accepted_terms_version,
     }
 
     for q in spec["questions"]:
@@ -195,8 +196,64 @@ def test_acceptance_is_stamped_with_the_version_accepted(tmp_path, spec):
         collector_factory=lambda: None,
         overlay=overlay,
     )
-    sub = parse_webhook(build_payload(spec))
+    # The version comes from the form, which carries the digest it was
+    # rendered with. This test used to assert the server stamped
+    # `overlay.terms_digest()` on arrival — which is precisely how a stale
+    # form got recorded as acceptance of newer words.
+    payload = build_payload(spec)
+    _set_terms_version(payload, overlay.terms_digest())
+    sub = parse_webhook(payload)
     service.accept(sub)
     assert sub.application.accepted_terms
     assert sub.application.accepted_terms_version == overlay.terms_digest()
     assert len(sub.application.accepted_terms_version) == 12
+
+
+def _set_terms_version(payload, value):
+    for f in payload["data"]["fields"]:
+        if "version" in f["label"].lower():
+            f["value"] = value
+            return
+    raise AssertionError("form spec has no terms version field")
+
+
+def test_a_stale_form_is_not_upgraded_to_the_current_terms(tmp_path, spec):
+    """The whole point: what they saw is what is recorded, even if it is old."""
+    from talent_engine.config import load_program
+    from talent_engine.programs import load_overlay
+    from talent_engine.server.webhook import IntakeService
+
+    overlay = load_overlay("prezenti-sponsorship-trial")
+    service = IntakeService(
+        load_program("prezenti-sponsorship-trial"),
+        str(tmp_path / "t.db"),
+        collector_factory=lambda: None,
+        overlay=overlay,
+    )
+    payload = build_payload(spec)
+    _set_terms_version(payload, "deadbeefcafe")
+    sub = parse_webhook(payload)
+    service.accept(sub)
+    assert sub.application.accepted_terms_version == "deadbeefcafe"
+    assert sub.application.accepted_terms_version != overlay.terms_digest()
+
+
+def test_a_form_that_submits_no_version_leaves_it_unknown(tmp_path, spec):
+    """Unknown must stay unknown; the acceptance gate fails closed on it."""
+    from talent_engine.config import load_program
+    from talent_engine.programs import load_overlay
+    from talent_engine.server.webhook import IntakeService
+
+    overlay = load_overlay("prezenti-sponsorship-trial")
+    service = IntakeService(
+        load_program("prezenti-sponsorship-trial"),
+        str(tmp_path / "t.db"),
+        collector_factory=lambda: None,
+        overlay=overlay,
+    )
+    payload = build_payload(spec)
+    _set_terms_version(payload, "")
+    sub = parse_webhook(payload)
+    service.accept(sub)
+    assert sub.application.accepted_terms
+    assert sub.application.accepted_terms_version == ""

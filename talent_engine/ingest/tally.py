@@ -55,6 +55,11 @@ TERMS_KEYS = (
     "terms",
 )
 
+# A hidden field carrying the terms digest the form was rendered with. Checked
+# before TERMS_KEYS below, because "terms version" also contains "terms" and
+# would otherwise be read as the acceptance checkbox itself.
+TERMS_VERSION_KEYS = ("terms version", "terms_version", "termsversion")
+
 # Field types Tally uses for contact information, regardless of the label the
 # form author typed.
 CONTACT_TYPES = {"INPUT_EMAIL", "INPUT_PHONE_NUMBER"}
@@ -238,7 +243,12 @@ def parse_webhook(payload: dict[str, Any]) -> Submission:
         label = str(f.get("label") or f.get("key") or "")
         values.append((label, str(f.get("type") or ""), _resolve(f)))
 
-    def pick(keys: tuple[str, ...], *, exclude_contact: bool = False) -> str:
+    def pick(
+        keys: tuple[str, ...],
+        *,
+        exclude_contact: bool = False,
+        exclude: tuple[str, ...] = (),
+    ) -> str:
         for label, ftype, value in values:
             # "Telegram handle" matches HANDLE_KEYS on the word "handle", and a
             # form that asks for it before the GitHub question would otherwise
@@ -246,6 +256,10 @@ def parse_webhook(payload: dict[str, Any]) -> Submission:
             # order must not decide this, so contact fields are skipped by
             # label as well as by type.
             if exclude_contact and (ftype in CONTACT_TYPES or _match(label, CONTACT_KEYS)):
+                continue
+            # "Terms version" contains "terms", so the acceptance checkbox
+            # would otherwise read the digest as its own value.
+            if exclude and _match(label, exclude):
                 continue
             flat = _flatten(value)
             if flat and _match(label, keys):
@@ -276,11 +290,16 @@ def parse_webhook(payload: dict[str, Any]) -> Submission:
     # A ticked checkbox arrives as the option text, an unticked one as empty.
     # Anything other than a positive value is treated as NOT accepted: silence
     # must never be read as agreement.
-    terms_raw = pick(TERMS_KEYS)
+    terms_raw = pick(TERMS_KEYS, exclude=TERMS_VERSION_KEYS)
     accepted = bool(terms_raw) and terms_raw.strip().lower() not in ("no", "false", "0")
 
+    # The digest of the terms the form was rendered with. Submitted by the
+    # applicant, never supplied by the server: stamping the server's current
+    # digest at webhook time recorded acceptance of words a stale form never
+    # showed them.
     application = Application(
         accepted_terms=accepted,
+        accepted_terms_version=pick(TERMS_VERSION_KEYS),
         context_statement=pick(CONTEXT_KEYS),
         context_factors=pick_list(FACTOR_KEYS),
         referrer_name=pick(REFERRER_KEYS),

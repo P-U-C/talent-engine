@@ -1,6 +1,6 @@
 {
   "key": "sponsorship-application",
-  "title": "Builder Sponsorship — application",
+  "title": "Builder Sponsorship \u2014 application",
   "description": "Question labels are load-bearing. The webhook parser identifies fields by matching words in the label against the alias tables in talent_engine/ingest/normalize.py, so renaming a question can silently stop a field being read. tests/test_form_spec.py round-trips this file through the parser and fails if any mapped question stops resolving. Change labels here, not in Tally's editor.",
   "questions": [
     {
@@ -46,7 +46,7 @@
       "why": "Monitored during the program to see whether the funded work actually moves."
     },
     {
-      "label": "Build plan — what will you make with this sponsorship?",
+      "label": "Build plan \u2014 what will you make with this sponsorship?",
       "type": "TEXTAREA",
       "required": true,
       "maps_to": "application.build_plan",
@@ -57,14 +57,14 @@
       "type": "TEXTAREA",
       "required": true,
       "maps_to": "application.extra",
-      "why": "Program fit, assessed by a human at selection and again at the month-two gate. Not a scored dimension — fit is a program question, not an evidence question."
+      "why": "Program fit, assessed by a human at selection and again at the month-two gate. Not a scored dimension \u2014 fit is a program question, not an evidence question."
     },
     {
       "label": "Referred by",
       "type": "INPUT_TEXT",
       "required": false,
       "maps_to": "application.referrer_name",
-      "why": "Scores only on exact match against the program's registry. An unrecognised name scores zero and flags — so leave it blank rather than guessing."
+      "why": "Scores only on exact match against the program's registry. An unrecognised name scores zero and flags \u2014 so leave it blank rather than guessing."
     },
     {
       "label": "Which of these factors apply to you?",
@@ -78,7 +78,7 @@
         "Building alongside unrelated paid work",
         "None of these"
       ],
-      "why": "Self-declared only. Invariant 2: nothing about a person's circumstances is ever inferred. Tally sends option ids, not text — the parser resolves them, or these would score as unrecognised factors."
+      "why": "Self-declared only. Invariant 2: nothing about a person's circumstances is ever inferred. Tally sends option ids, not text \u2014 the parser resolves them, or these would score as unrecognised factors."
     },
     {
       "label": "Anything about your context we should know?",
@@ -95,7 +95,15 @@
       "options": [
         "I have read the terms at sponsorships.prezenti.xyz and I accept them: 2% of Celo revenue and grant income, capped at $14,000, expiring 36 months after the term, pro-rated by the months I receive. No equity is taken. I keep all IP and may withdraw at any time without penalty."
       ],
-      "why": "Terms displayed on a page are not agreement; an affirmative act is. The option text restates the substance so nobody accepts a link they did not open, and the version accepted is stamped on the submission — otherwise editing the policy silently rewrites what everyone who already applied is taken to have agreed to."
+      "why": "Terms displayed on a page are not agreement; an affirmative act is. The option text restates the substance so nobody accepts a link they did not open, and the version accepted is stamped on the submission \u2014 otherwise editing the policy silently rewrites what everyone who already applied is taken to have agreed to."
+    },
+    {
+      "label": "Terms version",
+      "type": "HIDDEN",
+      "required": true,
+      "maps_to": "application.accepted_terms_version",
+      "prefill_from": "query:terms_version",
+      "why": "The digest of the terms this form was rendered with, submitted by the applicant rather than stamped by the server. Stamping the server's current digest on arrival recorded acceptance of words a stale form, a cached embed or a queued retry never showed them. Absent means unknown, and the acceptance gate treats unknown as not-current."
     }
   ]
 }

@@ -313,9 +313,19 @@ def cmd_tracker(args) -> int:
     """What has been done for each recipient, and what has not."""
     import json as _json
 
+    from .programs.policy import load_overlay
+    from .store.db import programme_periods
+
     cfg = load_program(args.program)
+    overlay = load_overlay(args.program)
+    # The term's months, so an absent month-three receipt is visible rather
+    # than being covered by a month-one one.
+    periods = programme_periods(
+        getattr(overlay, "duration_months", 0),
+        args.start or getattr(overlay, "term_start", "") or "",
+    )
     store = Store(args.db)
-    summary = store.ledger_summary(cfg.key)
+    summary = store.ledger_summary(cfg.key, periods=periods)
     if args.format == "json":
         print(_json.dumps(summary, indent=2))
         store.close()
@@ -724,6 +734,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("tracker", help="what is done and what is outstanding")
     s.add_argument("--program", required=True)
+    s.add_argument(
+        "--start",
+        help="first programme month, YYYY-MM; enables per-month expectations",
+    )
     s.add_argument("--format", choices=["table", "json"], default="table")
     s.set_defaults(func=cmd_tracker)
 

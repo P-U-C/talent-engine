@@ -53,14 +53,16 @@
       {
         "name": "Prezenti",
         "address_env": "PREZENTI_GIVEBACK_ADDRESS",
-        "bps": 100
-      },
-      {
-        "name": "Celo Community Fund",
-        "address_env": "CELO_COMMUNITY_FUND_ADDRESS",
-        "bps": 100
+        "bps": 200
       }
-    ]
+    ],
+    "obligation_runs_to": "Prezenti",
+    "prezenti_onward_commitment": {
+      "name": "Celo Community Fund",
+      "address_env": "CELO_COMMUNITY_FUND_ADDRESS",
+      "bps_of_receipts": 100,
+      "note": "Prezenti's own commitment to route half of what it receives under these pledges onward. It is not an obligation of the builder, who owes 2% to Prezenti and nothing to anyone else."
+    }
   },
   "kpis": {
     "celo_deployments_or_material_contributions": 3,

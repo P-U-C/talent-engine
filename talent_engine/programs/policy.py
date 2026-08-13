@@ -87,6 +87,30 @@ class ProgramOverlay:
         if sum(int(r.get("bps", 0)) for r in recipients) != total_bps:
             raise ValueError(f"{self.key}: give-back recipient shares do not add up")
 
+        # One obligation, one counterparty. The policy used to split the
+        # give-back 100 bps to Prezenti and 100 bps to the Celo Community Fund,
+        # which asks a builder to owe something to a party they have no
+        # agreement with, that cannot know the obligation exists, and that
+        # would have no standing to act on it. Prezenti's onward promise to the
+        # Fund belongs in `prezenti_onward_commitment`, where it is published
+        # without being something the builder owes.
+        #
+        # This is enforced rather than documented because `terms_digest()`
+        # fingerprints this block: while the policy said 1% + 1%, the
+        # "current terms accepted" gate was certifying a structure the written
+        # terms had already abandoned.
+        if total_bps > 0 and len(recipients) != 1:
+            raise ValueError(
+                f"{self.key}: a give-back must name exactly one counterparty "
+                f"(found {len(recipients)}). A builder cannot owe a third party "
+                "they have no agreement with; use prezenti_onward_commitment."
+            )
+        onward = self.giveback.get("prezenti_onward_commitment") or {}
+        if onward and int(onward.get("bps_of_receipts", 0)) > total_bps:
+            raise ValueError(
+                f"{self.key}: the onward commitment cannot exceed what is received"
+            )
+
         # An uncapped, perpetual give-back is disproportionate to an in-kind
         # grant of this size, and it selects against builders who have other
         # options — which are exactly the builders the rubric exists to find.
@@ -192,6 +216,19 @@ class ProgramOverlay:
             ),
             "enforcement: " + str(g.get("enforcement", "unspecified")),
         ]
+        # Say who is owed. "2%" without a counterparty is the ambiguity that let
+        # the policy and the written terms disagree for as long as they did.
+        if g.get("obligation_runs_to"):
+            lines.insert(2, f"owed to {g['obligation_runs_to']}, and to nobody else")
+        onward = g.get("prezenti_onward_commitment") or {}
+        if onward:
+            lines.insert(
+                3,
+                f"Prezenti separately routes "
+                f"{int(onward.get('bps_of_receipts', 0)) / 100:.0f}% of what it "
+                f"receives onward to {onward.get('name')} — a commitment made "
+                "by Prezenti, not by you",
+            )
         return lines
 
     @property
