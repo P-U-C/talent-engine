@@ -67,13 +67,15 @@ CREATE TABLE IF NOT EXISTS cohort (
     declared_repo TEXT DEFAULT '',
     baseline_run_id TEXT DEFAULT '',
     selected_at TEXT NOT NULL,
-    -- Acceptance artefacts. The split address and attestation UID are the two
+    -- Acceptance artefacts. The payment route and attestation UID are the
     -- public objects the terms depend on, so they live next to the cohort row
     -- rather than in someone's notes: `monitor` and `measure` need to reach
     -- them, and so does anyone auditing what was actually agreed.
     accepted_at TEXT DEFAULT '',
-    split_address TEXT DEFAULT '',
+    split_address TEXT DEFAULT '', -- legacy name kept for old DBs; no new Splits are deployed
+    payment_address TEXT DEFAULT '',
     attestation_uid TEXT DEFAULT '',
+    attestation_signer TEXT DEFAULT '',
     months_received INTEGER DEFAULT 0,
     PRIMARY KEY (program, handle)
 );
@@ -144,6 +146,35 @@ CREATE TABLE IF NOT EXISTS gate_overrides (
 );
 CREATE INDEX IF NOT EXISTS idx_overrides_handle ON gate_overrides(program, handle);
 
+-- Smoke tests, known bad rows, and other records that must not enter selection
+-- or reporting. Kept by handle because selection allocates funded seats by
+-- handle, and a smoke-test handle must fail closed everywhere.
+CREATE TABLE IF NOT EXISTS applicant_quarantine (
+    program TEXT NOT NULL,
+    handle TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    PRIMARY KEY (program, handle)
+);
+
+-- Public pledge lifecycle. The original EAS attestation is signed by the
+-- builder, so close-out and revocation are events with their own UIDs/txs; they
+-- are not mutable fields on the cohort row.
+CREATE TABLE IF NOT EXISTS attestation_events (
+    event_id TEXT PRIMARY KEY,
+    program TEXT NOT NULL,
+    handle TEXT NOT NULL,
+    event_type TEXT NOT NULL,        -- initial | replacement | revocation
+    uid TEXT NOT NULL,
+    previous_uid TEXT DEFAULT '',
+    signer TEXT DEFAULT '',
+    months_funded INTEGER,
+    tx_hash TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    recorded_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_attestation_events_handle ON attestation_events(program, handle);
+
 -- What happens after acceptance. The engine scored people, accepted them, and
 -- then had nothing to say about whether the money actually moved: receipts,
 -- reimbursements, the month-two Celo result, months funded, vendor offsets,
@@ -211,7 +242,20 @@ class Store:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA busy_timeout=5000")
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Small additive migrations for already-live SQLite databases."""
+        cohort_cols = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(cohort)").fetchall()
+        }
+        for name, ddl in {
+            "payment_address": "ALTER TABLE cohort ADD COLUMN payment_address TEXT DEFAULT ''",
+            "attestation_signer": "ALTER TABLE cohort ADD COLUMN attestation_signer TEXT DEFAULT ''",
+        }.items():
+            if name not in cohort_cols:
+                self.conn.execute(ddl)
 
     def _restrict_permissions(self) -> None:
         """0600 on the database and its sidecars. Best effort, never fatal."""
@@ -355,6 +399,8 @@ class Store:
     ) -> None:
         declared_repos = declared_repos or {}
         for h in handles:
+            if self.is_quarantined(program, h):
+                raise ValueError(f"{h} is quarantined and cannot be selected")
             self.conn.execute(
                 "INSERT OR REPLACE INTO cohort (program, handle, declared_repo, "
                 "baseline_run_id, selected_at) VALUES (?, ?, ?, ?, ?)",
@@ -367,28 +413,37 @@ class Store:
         program: str,
         handle: str,
         *,
+        payment_address: str = "",
         split_address: str = "",
         attestation_uid: str = "",
+        attestation_signer: str = "",
         months_received: int | None = None,
     ) -> bool:
         """Attach acceptance artefacts to an existing cohort row.
 
-        Returns False if the handle is not in the cohort — accepting someone
-        who was never selected should fail loudly rather than create a row
-        that no selection decision stands behind.
+        Kept for narrow tests and old callers. Real CLI acceptance uses
+        `accept_candidate`, which validates and writes the decision/cohort row
+        in one transaction.
         """
         row = self.conn.execute(
             "SELECT 1 FROM cohort WHERE program = ? AND handle = ?", (program, handle)
         ).fetchone()
         if not row:
             return False
+        if not ((payment_address or split_address) and attestation_uid and attestation_signer):
+            raise ValueError("acceptance requires payment address, attestation UID and signer")
         sets, params = ["accepted_at = ?"], [utc_now_iso()]
-        if split_address:
+        if payment_address or split_address:
+            sets.append("payment_address = ?")
+            params.append(payment_address or split_address)
             sets.append("split_address = ?")
-            params.append(split_address)
+            params.append(split_address or payment_address)
         if attestation_uid:
             sets.append("attestation_uid = ?")
             params.append(attestation_uid)
+        if attestation_signer:
+            sets.append("attestation_signer = ?")
+            params.append(attestation_signer)
         if months_received is not None:
             sets.append("months_received = ?")
             params.append(months_received)
@@ -400,11 +455,235 @@ class Store:
         self.conn.commit()
         return True
 
+    def accept_candidate(
+        self,
+        program: str,
+        handle: str,
+        *,
+        selected: bool,
+        baseline_run_id: str = "",
+        declared_repo: str = "",
+        payment_address: str,
+        attestation_uid: str,
+        attestation_signer: str,
+        override: tuple[list[str], str, str] | None = None,
+    ) -> bool:
+        """Atomically select, accept, and attach required artefacts."""
+        if not (payment_address and attestation_uid and attestation_signer):
+            raise ValueError("acceptance requires payment_address, attestation_uid and attestation_signer")
+        now = utc_now_iso()
+        try:
+            with self.conn:
+                if self.is_quarantined(program, handle):
+                    raise ValueError(f"{handle} is quarantined and cannot be accepted")
+                if selected:
+                    self.conn.execute(
+                        "INSERT OR REPLACE INTO cohort (program, handle, declared_repo, "
+                        "baseline_run_id, selected_at) VALUES (?, ?, ?, ?, ?)",
+                        (program, handle, declared_repo, baseline_run_id, now),
+                    )
+                elif not self.conn.execute(
+                    "SELECT 1 FROM cohort WHERE program = ? AND handle = ?", (program, handle)
+                ).fetchone():
+                    return False
+                if override:
+                    gates, steward, reason = override
+                    self.conn.execute(
+                        "INSERT INTO gate_overrides (program, handle, gates, steward, reason, "
+                        "overridden_at) VALUES (?, ?, ?, ?, ?, ?)",
+                        (program, handle, ",".join(gates), steward, reason, now),
+                    )
+                self.conn.execute(
+                    "INSERT OR REPLACE INTO decisions (program, handle, decision, decided_at, "
+                    "note, feedback_sent_at) VALUES (?, ?, 'accepted', ?, '', "
+                    "COALESCE((SELECT feedback_sent_at FROM decisions WHERE program = ? "
+                    "AND handle = ?), ''))",
+                    (program, handle, now, program, handle),
+                )
+                self.conn.execute(
+                    "UPDATE cohort SET accepted_at = ?, payment_address = ?, split_address = ?, "
+                    "attestation_uid = ?, attestation_signer = ? WHERE program = ? AND handle = ?",
+                    (
+                        now,
+                        payment_address,
+                        payment_address,
+                        attestation_uid,
+                        attestation_signer,
+                        program,
+                        handle,
+                    ),
+                )
+                self._record_attestation_event_uncommitted(
+                    program,
+                    handle,
+                    "initial",
+                    attestation_uid,
+                    signer=attestation_signer,
+                    months_funded=0,
+                    note="initial mandatory public pledge",
+                )
+        except sqlite3.Error:
+            raise
+        return True
+
     def cohort(self, program: str) -> list[dict[str, Any]]:
         rows = self.conn.execute(
             "SELECT * FROM cohort WHERE program = ? ORDER BY handle", (program,)
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def quarantine_applicant(self, program: str, handle: str, reason: str) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO applicant_quarantine (program, handle, reason, "
+            "recorded_at) VALUES (?, ?, ?, ?)",
+            (program, handle, reason, utc_now_iso()),
+        )
+        self.conn.commit()
+
+    def is_quarantined(self, program: str, handle: str) -> bool:
+        return bool(
+            self.conn.execute(
+                "SELECT 1 FROM applicant_quarantine WHERE program = ? AND handle = ?",
+                (program, handle),
+            ).fetchone()
+        )
+
+    def quarantine(self, program: str) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT * FROM applicant_quarantine WHERE program = ? ORDER BY handle", (program,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def _record_attestation_event_uncommitted(
+        self,
+        program: str,
+        handle: str,
+        event_type: str,
+        uid: str,
+        *,
+        previous_uid: str = "",
+        signer: str = "",
+        months_funded: int | None = None,
+        tx_hash: str = "",
+        note: str = "",
+    ) -> str:
+        event_id = f"{program}:{handle}:{event_type}:{uid}:{utc_now_iso()}"
+        self.conn.execute(
+            "INSERT INTO attestation_events (event_id, program, handle, event_type, uid, "
+            "previous_uid, signer, months_funded, tx_hash, note, recorded_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                event_id,
+                program,
+                handle,
+                event_type,
+                uid,
+                previous_uid,
+                signer,
+                months_funded,
+                tx_hash,
+                note,
+                utc_now_iso(),
+            ),
+        )
+        return event_id
+
+    def record_attestation_event(
+        self,
+        program: str,
+        handle: str,
+        event_type: str,
+        uid: str,
+        *,
+        previous_uid: str = "",
+        signer: str = "",
+        months_funded: int | None = None,
+        tx_hash: str = "",
+        note: str = "",
+    ) -> str:
+        if event_type not in {"initial", "replacement", "revocation"}:
+            raise ValueError("unknown attestation event type")
+        event_id = self._record_attestation_event_uncommitted(
+            program,
+            handle,
+            event_type,
+            uid,
+            previous_uid=previous_uid,
+            signer=signer,
+            months_funded=months_funded,
+            tx_hash=tx_hash,
+            note=note,
+        )
+        self.conn.commit()
+        return event_id
+
+    def attestation_events(self, program: str, handle: str) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT * FROM attestation_events WHERE program = ? AND handle = ? "
+            "ORDER BY recorded_at",
+            (program, handle),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def record_closeout(
+        self,
+        program: str,
+        handle: str,
+        *,
+        owner: str,
+        months_funded: int,
+        replacement_uid: str,
+        original_uid: str,
+        signer: str,
+        revocation_tx: str = "",
+        note: str = "",
+    ) -> None:
+        if not owner:
+            raise ValueError("close-out needs an owner")
+        if months_funded < 0:
+            raise ValueError("months_funded cannot be negative")
+        now = utc_now_iso()
+        with self.conn:
+            self.conn.execute(
+                "UPDATE cohort SET months_received = ? WHERE program = ? AND handle = ?",
+                (months_funded, program, handle),
+            )
+            self.conn.execute(
+                "INSERT INTO operating_ledger (entry_id, program, handle, entry_type, period, "
+                "amount_usd, owner, reference, note, recorded_at) "
+                "VALUES (?, ?, ?, 'months_funded', '', NULL, ?, ?, ?, ?)",
+                (
+                    f"{program}:months_funded:{handle}:-:{now}",
+                    program,
+                    handle,
+                    owner,
+                    replacement_uid,
+                    str(months_funded),
+                    now,
+                ),
+            )
+            self._record_attestation_event_uncommitted(
+                program,
+                handle,
+                "replacement",
+                replacement_uid,
+                previous_uid=original_uid,
+                signer=signer,
+                months_funded=months_funded,
+                note=note or "builder-signed close-out replacement",
+            )
+            if revocation_tx:
+                self._record_attestation_event_uncommitted(
+                    program,
+                    handle,
+                    "revocation",
+                    original_uid,
+                    previous_uid=replacement_uid,
+                    signer=signer,
+                    months_funded=months_funded,
+                    tx_hash=revocation_tx,
+                    note="builder revoked superseded attestation",
+                )
 
     # ------------------------------------------------------------ submissions
 
@@ -491,15 +770,50 @@ class Store:
         sql += " ORDER BY received_at"
         return [dict(r) for r in self.conn.execute(sql, params).fetchall()]
 
-    def submissions(self, program: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    def submissions(
+        self,
+        program: str | None = None,
+        limit: int = 100,
+        *,
+        include_quarantined: bool = False,
+    ) -> list[dict[str, Any]]:
         sql = "SELECT * FROM submissions"
         params: list[Any] = []
+        where: list[str] = []
         if program:
-            sql += " WHERE program = ?"
+            where.append("program = ?")
             params.append(program)
+        if not include_quarantined:
+            where.append(
+                "NOT EXISTS (SELECT 1 FROM applicant_quarantine q "
+                "WHERE q.program = submissions.program AND q.handle = submissions.handle)"
+            )
+        if where:
+            sql += " WHERE " + " AND ".join(where)
         sql += " ORDER BY received_at DESC LIMIT ?"
         params.append(limit)
         return [dict(r) for r in self.conn.execute(sql, params).fetchall()]
+
+    def shortlist(self, program: str, limit: int | None = None) -> list[dict[str, Any]]:
+        """Deterministic latest-score shortlist across the whole applicant pool."""
+        rows = self.conn.execute(
+            "SELECT s.* FROM submissions s "
+            "WHERE s.program = ? AND s.status = 'scored' "
+            "AND NOT EXISTS (SELECT 1 FROM applicant_quarantine q "
+            "WHERE q.program = s.program AND q.handle = s.handle) "
+            "ORDER BY s.handle ASC, s.received_at DESC, s.submission_id DESC",
+            (program,),
+        ).fetchall()
+        latest_by_handle: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            handle = row["handle"]
+            if handle not in latest_by_handle:
+                latest_by_handle[handle] = dict(row)
+        out = sorted(
+            latest_by_handle.values(),
+            key=lambda r: (-(r["total"] or 0), r["handle"]),
+        )
+        return out[:limit] if limit else out
 
     def get_submission(self, submission_id: str) -> dict[str, Any] | None:
         row = self.conn.execute(
@@ -517,6 +831,8 @@ class Store:
         rows = self.conn.execute(
             "SELECT s.handle, s.snapshot_digest, s.scored_at FROM scores s "
             "JOIN runs r ON r.run_id = s.run_id WHERE r.program = ? "
+            "AND NOT EXISTS (SELECT 1 FROM applicant_quarantine q "
+            "WHERE q.program = r.program AND q.handle = s.handle) "
             "ORDER BY s.scored_at",
             (program,),
         ).fetchall()
@@ -657,6 +973,8 @@ def overrides(self, program: str, handle: str = "") -> list[dict[str, Any]]:
 
 def has_scored_application(self, program: str, handle: str) -> bool:
     """Did this person actually apply and get scored under this programme?"""
+    if self.is_quarantined(program, handle):
+        return False
     row = self.conn.execute(
         "SELECT 1 FROM submissions WHERE program = ? AND handle = ? "
         "AND status = 'scored' LIMIT 1",

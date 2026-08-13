@@ -376,7 +376,7 @@ def cmd_gates(args) -> int:
 
 def cmd_accept(args) -> int:
     """Record an acceptance and produce the letter. Deploys nothing."""
-    from .modes.acceptance import acceptance_letter, split_plan
+    from .modes.acceptance import acceptance_letter
     from .programs.policy import load_overlay
 
     cfg = load_program(args.program)
@@ -392,6 +392,7 @@ def cmd_accept(args) -> int:
     # programme's human checks -- and it printed the full acceptance letter.
     checked = gate_checks.evaluate(store, cfg.key, handle, overlay.terms_digest())
     unmet = gate_checks.failing(checked)
+    override_event = None
     if unmet:
         print("--- acceptance gates -------------------------------------------")
         print(gate_checks.render(checked))
@@ -402,7 +403,7 @@ def cmd_accept(args) -> int:
                 "Record the human checks with `talent-engine signoff`, or, if this "
                 "is a deliberate exception, re-run with:\n"
                 "  --override --steward <who> --reason <why>\n"
-                "An override is written to the audit log and named in the letter.",
+                "An override is written atomically with acceptance after artefacts validate.",
                 file=sys.stderr,
             )
             store.close()
@@ -415,74 +416,98 @@ def cmd_accept(args) -> int:
             )
             store.close()
             return 2
-        store.record_override(
-            cfg.key, handle, [g.key for g in unmet], args.steward, args.reason
-        )
+        override_event = ([g.key for g in unmet], args.steward, args.reason)
+
+    cohort_exists = any(m["handle"] == handle for m in store.cohort(cfg.key))
+    if not cohort_exists and not args.select:
         print(
-            f"\nOVERRIDDEN by {args.steward}: {args.reason}\n"
-            "Recorded in gate_overrides.",
+            f"{handle} is not in the {cfg.key} cohort. Selection is a human "
+            "decision; pass --select to record it here at the same time.",
             file=sys.stderr,
         )
+        store.close()
+        return 2
 
-    if not any(m["handle"] == handle for m in store.cohort(cfg.key)):
-        if not args.select:
-            print(
-                f"{handle} is not in the {cfg.key} cohort. Selection is a human "
-                "decision; pass --select to record it here at the same time.",
-                file=sys.stderr,
-            )
-            store.close()
-            return 2
-        store.select_cohort(cfg.key, [handle], baseline_run_id=args.baseline or "")
+    if args.split_address:
+        print(
+            "--split-address is obsolete for this trial. Use --payment-address "
+            "with the verified Prezenti Safe; no 0xSplits collector is deployed.",
+            file=sys.stderr,
+        )
+        store.close()
+        return 2
 
-    store.record_decision(cfg.key, handle, "accepted")
+    expected_payment = str(overlay.attestation.get("recipient", ""))
+    payment_address = args.payment_address or ""
+    if not payment_address:
+        print(
+            "--payment-address is required and must be the verified Prezenti Safe: "
+            f"{expected_payment}",
+            file=sys.stderr,
+        )
+        store.close()
+        return 2
+    if payment_address.lower() != expected_payment.lower():
+        print(
+            "payment address rejected: acceptance must use the verified Prezenti Safe "
+            f"{expected_payment}",
+            file=sys.stderr,
+        )
+        store.close()
+        return 2
+
     attestation_uid = args.attestation_uid or ""
-    if attestation_uid:
-        if not args.attestation_signer:
-            print(
-                "--attestation-uid requires --attestation-signer. Without the "
-                "builder wallet, the UID cannot prove who accepted the terms.",
-                file=sys.stderr,
-            )
-            store.close()
-            return 2
-        from .modes.attestations import AttestationValidationError, validate_attestation_uid
+    if not (attestation_uid and args.attestation_signer):
+        print(
+            "--attestation-uid and --attestation-signer are required. The public "
+            "pledge is mandatory for this trial and must be validated before acceptance.",
+            file=sys.stderr,
+        )
+        store.close()
+        return 2
+    from .modes.attestations import AttestationValidationError, validate_attestation_uid
 
+    try:
+        validate_attestation_uid(
+            attestation_uid,
+            overlay,
+            handle=handle,
+            signer=args.attestation_signer,
+            rpc_url=args.attestation_rpc,
+        )
+    except AttestationValidationError as exc:
+        print(f"attestation rejected: {exc}", file=sys.stderr)
+        store.close()
+        return 2
+
+    declared_repo = ""
+    app_row = store.latest_application(cfg.key, handle)
+    if app_row:
         try:
-            validate_attestation_uid(
-                attestation_uid,
-                overlay,
-                handle=handle,
-                signer=args.attestation_signer,
-                rpc_url=args.attestation_rpc,
-            )
-        except AttestationValidationError as exc:
-            print(f"attestation rejected: {exc}", file=sys.stderr)
-            store.close()
-            return 2
+            declared_repo = json.loads(app_row["application_json"] or "{}").get("declared_repo", "")
+        except (TypeError, ValueError):
+            declared_repo = ""
 
-    ok = store.record_acceptance(
-        cfg.key,
-        handle,
-        split_address=args.split_address or "",
-        attestation_uid=attestation_uid,
-    )
+    try:
+        ok = store.accept_candidate(
+            cfg.key,
+            handle,
+            selected=args.select and not cohort_exists,
+            baseline_run_id=args.baseline or "",
+            declared_repo=declared_repo,
+            payment_address=payment_address,
+            attestation_uid=attestation_uid,
+            attestation_signer=args.attestation_signer,
+            override=override_event,
+        )
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        store.close()
+        return 2
     if not ok:
         print(f"could not record acceptance for {handle}", file=sys.stderr)
         store.close()
         return 1
-
-    plan = split_plan(overlay, dict(os.environ))
-    if not args.split_address:
-        print("--- split to create -------------------------------------------")
-        print(plan.render())
-        if not plan.resolved:
-            print(
-                "\nSome recipient addresses are unset; export them before creating "
-                "the split.",
-                file=sys.stderr,
-            )
-        print()
 
     score_row = None
     for row in store.submissions(cfg.key, limit=500):
@@ -495,11 +520,110 @@ def cmd_accept(args) -> int:
         acceptance_letter(
             handle,
             overlay,
-            split_address=args.split_address or "",
+            payment_address=payment_address,
             score=score_row["total"] if score_row else None,
             caveat=score_row["concerns"] if score_row else "",
         )
     )
+    store.close()
+    return 0
+
+
+def cmd_shortlist(args) -> int:
+    """Deterministic shortlist across the whole scored applicant pool."""
+    import json as _json
+
+    store = Store(args.db)
+    rows = store.shortlist(args.program, limit=args.limit)
+    if args.format == "json":
+        print(_json.dumps(rows, indent=2))
+    else:
+        for i, r in enumerate(rows, 1):
+            total = "" if r["total"] is None else f"{r['total']:.2f}"
+            print(f"{i:>2}. {r['handle']:<20} {total:>6}  {r['run_id']}  {r['received_at']}")
+            if r["concerns"]:
+                print(f"    {r['concerns']}")
+    store.close()
+    return 0
+
+
+def cmd_quarantine(args) -> int:
+    """Exclude a smoke-test or invalid handle from selection and reporting."""
+    cfg = load_program(args.program)
+    store = Store(args.db)
+    handle = normalize_handle(args.handle) or args.handle
+    store.quarantine_applicant(cfg.key, handle, args.reason)
+    print(f"quarantined {handle}: {args.reason}")
+    store.close()
+    return 0
+
+
+def cmd_closeout(args) -> int:
+    """Record builder-signed replacement/revocation for a pledge close-out."""
+    from .modes.attestations import (
+        AttestationValidationError,
+        validate_replacement_uid,
+        validate_revoked_uid,
+    )
+    from .programs.policy import load_overlay
+
+    cfg = load_program(args.program)
+    overlay = load_overlay(args.overlay or args.program)
+    store = Store(args.db)
+    handle = normalize_handle(args.handle) or args.handle
+    cohort = {m["handle"]: m for m in store.cohort(cfg.key)}
+    row = cohort.get(handle)
+    if not row or not row.get("attestation_uid"):
+        print(f"{handle} has no original attestation UID recorded", file=sys.stderr)
+        store.close()
+        return 2
+    original_uid = args.original_uid or row["attestation_uid"]
+    if args.months_funded < 0 or args.months_funded > overlay.duration_months:
+        print(
+            f"--months-funded must be between 0 and {overlay.duration_months}",
+            file=sys.stderr,
+        )
+        store.close()
+        return 2
+    signer = args.attestation_signer or row.get("attestation_signer") or ""
+    if not signer:
+        print("--attestation-signer is required for close-out validation", file=sys.stderr)
+        store.close()
+        return 2
+    try:
+        validate_replacement_uid(
+            args.replacement_uid,
+            overlay,
+            handle=handle,
+            signer=signer,
+            previous_uid=original_uid,
+            months_funded=args.months_funded,
+            rpc_url=args.attestation_rpc,
+        )
+        if args.revocation_tx:
+            validate_revoked_uid(original_uid, overlay, rpc_url=args.attestation_rpc)
+    except AttestationValidationError as exc:
+        print(f"close-out rejected: {exc}", file=sys.stderr)
+        store.close()
+        return 2
+    store.record_closeout(
+        cfg.key,
+        handle,
+        owner=args.owner or overlay.operating_owner,
+        months_funded=args.months_funded,
+        replacement_uid=args.replacement_uid,
+        original_uid=original_uid,
+        signer=signer,
+        revocation_tx=args.revocation_tx or "",
+        note=args.note or "",
+    )
+    print(f"recorded close-out for {handle}: {args.months_funded} month(s) funded")
+    if not args.revocation_tx:
+        print(
+            "replacement recorded; the builder still must revoke the superseded "
+            "attestation and provide --revocation-tx",
+            file=sys.stderr,
+        )
     store.close()
     return 0
 
@@ -616,7 +740,9 @@ def cmd_serve(args) -> int:
 
 def cmd_submissions(args) -> int:
     store = Store(args.db)
-    rows = store.submissions(args.program, limit=args.limit)
+    rows = store.submissions(
+        args.program, limit=args.limit, include_quarantined=args.include_quarantined
+    )
     if args.with_contact:
         # Opt-in, and never part of the default view: this is the one command
         # that reads the quarantined contacts table.
@@ -715,8 +841,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--program", required=True)
     s.add_argument("--handle", required=True)
     s.add_argument("--overlay", help="policy key, if it differs from --program")
-    s.add_argument("--split-address", help="the 0xSplits address, once it exists")
-    s.add_argument("--attestation-uid", help="the signed pledge attestation")
+    s.add_argument("--payment-address", help="verified Prezenti Safe receiving direct give-back payments")
+    s.add_argument("--split-address", help=argparse.SUPPRESS)
+    s.add_argument("--attestation-uid", help="the signed public pledge attestation")
     s.add_argument("--attestation-signer", help="builder wallet that signed the attestation")
     s.add_argument(
         "--attestation-rpc",
@@ -775,6 +902,32 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--overlay", help="policy key, if it differs from --program")
     s.set_defaults(func=cmd_gates)
 
+    s = sub.add_parser("shortlist", help="rank the whole scored applicant pool deterministically")
+    s.add_argument("--program", required=True)
+    s.add_argument("--limit", type=int)
+    s.add_argument("--format", choices=["table", "json"], default="table")
+    s.set_defaults(func=cmd_shortlist)
+
+    s = sub.add_parser("quarantine", help="exclude a handle from selection/reporting")
+    s.add_argument("--program", required=True)
+    s.add_argument("--handle", required=True)
+    s.add_argument("--reason", required=True)
+    s.set_defaults(func=cmd_quarantine)
+
+    s = sub.add_parser("closeout", help="record builder pledge replacement/revocation")
+    s.add_argument("--program", required=True)
+    s.add_argument("--handle", required=True)
+    s.add_argument("--overlay", help="policy key, if it differs from --program")
+    s.add_argument("--months-funded", type=int, required=True)
+    s.add_argument("--replacement-uid", required=True)
+    s.add_argument("--original-uid", help="defaults to the cohort acceptance UID")
+    s.add_argument("--attestation-signer", help="builder wallet; defaults to accepted signer")
+    s.add_argument("--attestation-rpc", default="https://forno.celo.org")
+    s.add_argument("--revocation-tx", help="transaction where the builder revoked the original UID")
+    s.add_argument("--owner", help="operator recording the close-out")
+    s.add_argument("--note", default="")
+    s.set_defaults(func=cmd_closeout)
+
     s = sub.add_parser(
         "rings", help="relationships between applicants (needs a pool, not one profile)"
     )
@@ -801,6 +954,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--with-contact",
         action="store_true",
         help="include contact details (reads the quarantined contacts table)",
+    )
+    s.add_argument(
+        "--include-quarantined",
+        action="store_true",
+        help="include handles excluded from selection/reporting",
     )
     s.set_defaults(func=cmd_submissions)
 

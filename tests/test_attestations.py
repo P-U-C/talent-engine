@@ -76,20 +76,74 @@ def test_validate_attestation_accepts_the_current_trial_pledge(monkeypatch):
     assert got.uid == UID
 
 
+def test_validate_replacement_requires_original_uid_and_months(monkeypatch):
+    overlay = load_overlay("prezenti-sponsorship-trial")
+    previous = "0x" + "12" * 32
+    monkeypatch.setattr(
+        attestations,
+        "get_attestation",
+        lambda uid, eas, rpc_url: _attestation(
+            overlay,
+            "amara",
+            ref_uid=previous,
+            months_funded=2,
+        ),
+    )
+    got = attestations.validate_replacement_uid(
+        UID,
+        overlay,
+        handle="amara",
+        signer=SIGNER,
+        previous_uid=previous,
+        months_funded=2,
+    )
+    assert got.ref_uid == previous
+
+    with pytest.raises(AttestationValidationError, match="months funded"):
+        attestations.validate_replacement_uid(
+            UID,
+            overlay,
+            handle="amara",
+            signer=SIGNER,
+            previous_uid=previous,
+            months_funded=3,
+        )
+
+
+def test_validate_revoked_uid_requires_on_chain_revocation(monkeypatch):
+    overlay = load_overlay("prezenti-sponsorship-trial")
+    monkeypatch.setattr(
+        attestations,
+        "get_attestation",
+        lambda uid, eas, rpc_url: _attestation(overlay, "amara", revocation_time=42),
+    )
+    attestations.validate_revoked_uid(UID, overlay)
+
+    monkeypatch.setattr(
+        attestations,
+        "get_attestation",
+        lambda uid, eas, rpc_url: _attestation(overlay, "amara", revocation_time=0),
+    )
+    with pytest.raises(AttestationValidationError, match="not been revoked"):
+        attestations.validate_revoked_uid(UID, overlay)
+
+
 def _attestation(
     overlay,
     handle: str,
     *,
     terms_hash: str | None = None,
     months_funded: int = 0,
+    ref_uid: str = attestations.ZERO_UID,
+    revocation_time: int = 0,
 ) -> Attestation:
     return Attestation(
         uid=UID,
         schema=overlay.attestation["schema_uid"],
         time=1,
         expiration_time=overlay.attestation_expiration,
-        revocation_time=0,
-        ref_uid=attestations.ZERO_UID,
+        revocation_time=revocation_time,
+        ref_uid=ref_uid,
         recipient=overlay.attestation["recipient"].lower(),
         attester=SIGNER.lower(),
         revocable=True,

@@ -67,8 +67,9 @@ compensation with no employment or agency relationship created.
 The formula is published: `2% × (months funded ÷ 4)`. The figure is recorded
 once in the operating ledger as `months_funded` at withdrawal or term end. The
 initial pledge no longer asks the builder to guess this at acceptance; the
-close-out procedure uses a replacement attestation once the actual number is
-known, then revokes the superseded UID.
+close-out procedure uses a builder-signed replacement attestation once the
+actual number is known, and the builder revokes the superseded UID unless a
+separate delegated authority exists.
 
 ### 7. Data protection — **closed as policy, open as compliance (see C)**
 
@@ -78,11 +79,14 @@ who consent and scouted people assessed only on already-public activity are all
 now stated. Whether that constitutes a lawful basis in every jurisdiction an
 applicant might sit in is question C.
 
-### 8. Public record of unsuccessful applicants — **closed**
+### 8. Public record and pledge disclosure — **closed**
 
-The public record of backing is now a separate explicit opt-in at acceptance
-rather than something riding on acceptance itself. Declining changes nothing
-else. Nobody unselected is ever named publicly.
+The trial now chooses the mandatory-public path rather than pretending public
+backing is optional while requiring an on-chain pledge. The application terms
+state before submission that acceptance requires a public Celo EAS attestation
+naming the builder's GitHub handle. No unselected applicant is named publicly,
+and additional selected dossiers or announcements still require the programme's
+separate consent process.
 
 ---
 

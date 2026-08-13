@@ -90,6 +90,9 @@ def _policy_dict():
         "term_end": policy.term_end,
         "terms_release": copy.deepcopy(policy.terms_release),
         "attestation": copy.deepcopy(policy.attestation),
+        "public_attestation_required": policy.public_attestation_required,
+        "payment": copy.deepcopy(policy.payment),
+        "operating_owner": policy.operating_owner,
     }
 
 
@@ -133,7 +136,11 @@ def _overlay(**giveback_overrides):
             "term_end": "2026-12-29",
             "terms_release": {
                 "version": "test-terms",
-                "document": "docs/terms/prezenti-sponsorship-trial-2026-08-13.md",
+                "document": "docs/terms/prezenti-sponsorship-trial-2026-08-13-v2.md",
+            },
+            "payment": {
+                "method": "direct_to_prezenti_safe",
+                "recipient": "0xA5c9389A0Ce1bFe24FF883E761Ff313225C77D44",
             },
             "commitments_to_recipient": {
                 "retains_all_ip_and_equity": True,
@@ -173,6 +180,7 @@ def test_taking_equity_is_refused_at_this_cheque_size():
         "term_start": base.term_start,
         "term_end": base.term_end,
         "terms_release": base.terms_release,
+        "payment": base.payment,
         "commitments_to_recipient": base.commitments_to_recipient,
         "upside": {"equity_taken": True},
     }
@@ -194,6 +202,7 @@ def test_terms_must_run_both_ways():
         "term_start": base.term_start,
         "term_end": base.term_end,
         "terms_release": base.terms_release,
+        "payment": base.payment,
     }
     with pytest.raises(ValueError, match="owes the recipient"):
         ProgramOverlay.from_dict(data)
@@ -224,12 +233,33 @@ def test_onward_commitment_is_half_of_prezentis_receipts():
         _overlay(prezenti_onward_commitment={"name": "Fund", "bps_of_covered_income": 50})
 
 
+def test_payment_route_must_be_direct_to_prezenti_safe():
+    base = _policy_dict()
+    base["payment"]["method"] = "splits_collector"
+    with pytest.raises(ValueError, match="do not deploy a collector"):
+        ProgramOverlay.from_dict(base)
+
+    base = _policy_dict()
+    base["payment"]["recipient"] = "0x1111111111111111111111111111111111111111"
+    with pytest.raises(ValueError, match="verified Prezenti Safe"):
+        ProgramOverlay.from_dict(base)
+
+
+def test_public_attestation_is_declared_when_required():
+    base = _policy_dict()
+    base["public_attestation_required"] = False
+    with pytest.raises(ValueError, match="public_attestation_required"):
+        ProgramOverlay.from_dict(base)
+
+
 def test_the_terms_release_drives_both_form_marker_and_pledge_hash():
     o = load_overlay("prezenti-sponsorship-trial")
     assert o.terms_hash().startswith("0x")
     assert len(o.terms_hash()) == 66
     assert o.terms_digest() == o.terms_hash()[2:14]
-    assert o.terms_release["document"] == "docs/terms/prezenti-sponsorship-trial-2026-08-13.md"
+    assert o.terms_release["document"] == "docs/terms/prezenti-sponsorship-trial-2026-08-13-v2.md"
+    assert o.public_attestation_required is True
+    assert o.payment["method"] == "direct_to_prezenti_safe"
 
 
 def test_the_tracker_calendar_is_policy_state():

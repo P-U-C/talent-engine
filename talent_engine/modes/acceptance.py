@@ -3,12 +3,11 @@
 Two design positions worth stating, because both are places this could have
 been built differently and worse.
 
-**No contract is deployed from here.** Creating the 0xSplits contract needs a
-funded key with signing authority, and a scoring pipeline is the wrong process
-to hold one: it takes untrusted input from a public form, and the blast radius
-of a compromise should not include an on-chain wallet. So this emits the exact
-split parameters and records the address once it exists. Deploying is a
-deliberate act by a person, not a side effect of marking someone accepted.
+**No contract is deployed from here.** The trial does not create a 0xSplits
+collector. A collector receiving the full 2% levy would have to route 100% of
+its balance, which turns the payment plumbing into a second policy surface. The
+safe route is direct payment of the calculated levy to the verified Prezenti
+Safe, recorded as an acceptance artefact.
 
 **The letter states the terms in full, including the ones that constrain the
 program.** An acceptance email that lists what the recipient owes and omits
@@ -19,11 +18,9 @@ ways in the policy; they run both ways here.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from ..programs.policy import ProgramOverlay
 
-SPLITS_APP = "https://app.splits.org"
 # The trial give-back flow, not the generic Celo pledge at the site root. The
 # root records the old 1% Celo Community commitment against a schema with no
 # field for this programme's cap, sunset, pro-rating or ROFO — so sending a
@@ -51,50 +48,42 @@ COMMITMENT_TEXT = {
 
 
 @dataclass
-class SplitPlan:
-    """Everything needed to create the split, and nothing that creates it."""
+class PaymentRoute:
+    """The direct payment route for the calculated give-back levy."""
 
-    recipients: list[dict[str, Any]]
+    address: str
+    bps: int
     chain: str = "celo"
 
     @property
     def resolved(self) -> bool:
-        return all(r.get("address") for r in self.recipients)
+        return bool(self.address)
 
     def render(self) -> str:
-        lines = [f"Chain: {self.chain}", "Recipients:"]
-        for r in self.recipients:
-            addr = r.get("address") or f"<unset: set {r.get('address_env')}>"
-            lines.append(f"  {r['name']:<24} {r['bps'] / 100:.2f}%   {addr}")
-        lines.append(f"\nCreate at: {SPLITS_APP}")
-        return "\n".join(lines)
-
-
-def split_plan(overlay: ProgramOverlay, env: dict[str, str]) -> SplitPlan:
-    """Split parameters, with recipient addresses read from the environment.
-
-    Addresses are held in env vars rather than the policy file so the policy
-    can live in a public repository without publishing payout addresses.
-    """
-    recipients = []
-    for r in overlay.giveback.get("recipients", []):
-        env_key = r.get("address_env", "")
-        recipients.append(
-            {
-                "name": r.get("name", ""),
-                "bps": int(r.get("bps", 0)),
-                "address_env": env_key,
-                "address": env.get(env_key, "") if env_key else "",
-            }
+        return "\n".join(
+            [
+                f"Chain: {self.chain}",
+                "Payment route: direct transfer of the calculated levy",
+                f"  Prezenti Safe          {self.address or '<unset>'}",
+                f"  Formula                covered income × {self.bps / 100:.2f}%",
+                "No 0xSplits collector is deployed for this trial.",
+            ]
         )
-    return SplitPlan(recipients=recipients)
+
+
+def payment_route(overlay: ProgramOverlay) -> PaymentRoute:
+    """Direct payment route to the verified Prezenti Safe."""
+    return PaymentRoute(
+        address=str(overlay.attestation.get("recipient", "")),
+        bps=int(overlay.giveback.get("total_bps", 0)),
+    )
 
 
 def acceptance_letter(
     handle: str,
     overlay: ProgramOverlay,
     *,
-    split_address: str = "",
+    payment_address: str = "",
     score: float | None = None,
     caveat: str = "",
 ) -> str:
@@ -178,14 +167,14 @@ def acceptance_letter(
         )
         add("")
 
-    add("Two things to set up:")
-    if split_address:
-        add(f"  1. The give-back split is live at {split_address} on Celo.")
-        add("     Routing revenue through it is voluntary and makes paying trivial.")
-    else:
-        add("  1. We will send you the give-back split address shortly.")
-    add(f"  2. Sign the pledge at {PLEDGE_APP} — it records the terms above")
-    add("     publicly, so what was agreed is legible to everyone including you.")
+    add("Two acceptance artefacts:")
+    add(
+        f"  1. Pay any calculated give-back directly to the verified Prezenti Safe: "
+        f"{payment_address or overlay.attestation.get('recipient', '')}."
+    )
+    add("     No 0xSplits collector is deployed for this trial.")
+    add(f"  2. Sign the pledge at {PLEDGE_APP} — it records your GitHub handle")
+    add("     publicly on-chain, so what was agreed is legible to everyone including you.")
     add(
         f"     Canonical terms: {overlay.terms_uri} "
         f"(terms-version {overlay.terms_digest()})."

@@ -65,13 +65,55 @@ def validate_attestation_uid(
     signer: str = "",
     rpc_url: str = FORNO_RPC,
 ) -> Attestation:
-    """Fetch and validate a trial pledge attestation UID.
+    """Validate the initial mandatory public pledge."""
+    return _validate_trial_attestation(
+        uid,
+        overlay,
+        handle=handle,
+        signer=signer,
+        rpc_url=rpc_url,
+        expected_ref_uid=ZERO_UID,
+        expected_months=0,
+        require_unrevoked=True,
+    )
 
-    `signer` is optional only so historical UIDs can be inspected. First
-    acceptance should pass `--attestation-signer`; otherwise the attestation can
-    prove terms were signed, but not who signed them.
-    """
+
+def validate_replacement_uid(
+    uid: str,
+    overlay: ProgramOverlay,
+    *,
+    handle: str,
+    signer: str,
+    previous_uid: str,
+    months_funded: int,
+    rpc_url: str = FORNO_RPC,
+) -> Attestation:
+    """Validate a builder-signed close-out replacement attestation."""
+    return _validate_trial_attestation(
+        uid,
+        overlay,
+        handle=handle,
+        signer=signer,
+        rpc_url=rpc_url,
+        expected_ref_uid=previous_uid,
+        expected_months=months_funded,
+        require_unrevoked=True,
+    )
+
+
+def _validate_trial_attestation(
+    uid: str,
+    overlay: ProgramOverlay,
+    *,
+    handle: str,
+    signer: str = "",
+    rpc_url: str,
+    expected_ref_uid: str,
+    expected_months: int,
+    require_unrevoked: bool,
+) -> Attestation:
     uid = _normalise_uid(uid)
+    expected_ref_uid = _normalise_uid(expected_ref_uid)
     att = get_attestation(uid, overlay.attestation["eas_contract"], rpc_url=rpc_url)
     expected = overlay.attestation
 
@@ -80,7 +122,9 @@ def validate_attestation_uid(
     _expect(att.recipient.lower() == expected["recipient"].lower(), "wrong attestation recipient")
     _expect(att.expiration_time == overlay.attestation_expiration, "wrong native EAS expiry")
     _expect(att.revocable, "attestation is not revocable")
-    _expect(att.revocation_time == 0, "attestation has already been revoked")
+    if require_unrevoked:
+        _expect(att.revocation_time == 0, "attestation has already been revoked")
+    _expect(att.ref_uid.lower() == expected_ref_uid.lower(), "wrong referenced UID")
     if signer:
         _expect(att.attester.lower() == signer.lower(), "attestation signer does not match")
 
@@ -102,11 +146,25 @@ def validate_attestation_uid(
     )
     _expect(data.cap_usd == int(overlay.giveback_cap_usd), "wrong cap")
     _expect(data.expires_at == overlay.attestation_expiration, "wrong schema expiry")
-    _expect(data.months_funded_at_signing == 0, "initial pledge must not set months funded")
+    _expect(data.months_funded_at_signing == expected_months, "wrong months funded")
     _expect(data.covered_income == _covered_income(overlay), "wrong covered-income text")
     _expect(data.rofo_notice_days == int(overlay.upside.get("rofo_notice_days", 0)), "wrong ROFO notice")
     _expect(data.terms_uri == overlay.terms_uri, "wrong terms URI")
     _expect(data.terms_hash.lower() == overlay.terms_hash().lower(), "wrong terms hash")
+    return att
+
+
+def validate_revoked_uid(
+    uid: str,
+    overlay: ProgramOverlay,
+    *,
+    rpc_url: str = FORNO_RPC,
+) -> Attestation:
+    """Validate that a superseded attestation has actually been revoked."""
+    uid = _normalise_uid(uid)
+    att = get_attestation(uid, overlay.attestation["eas_contract"], rpc_url=rpc_url)
+    _expect(att.uid == uid, "attestation UID did not round-trip from EAS")
+    _expect(att.revocation_time > 0, "attestation has not been revoked on-chain")
     return att
 
 
