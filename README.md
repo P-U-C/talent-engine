@@ -17,8 +17,9 @@ which is the general engine. This fork is Prezenti's live deployment of it.
 
 ## The programme
 
-A trial: **5 places, 4 months, $7,000 total.** Each place is $1,400 of tooling
-that removes the main constraint on someone building alone.
+A trial: **5 places, 4 months, $7,000 total.** Applications close **2026-08-25**.
+Each place is $1,400 of tooling that removes the main constraint on someone
+building alone.
 
 | | |
 |---|---|
@@ -35,9 +36,11 @@ the ecosystem we are trying to bring people into.
 
 ### What we ask in return
 
-A good-faith pledge of **2% of revenue** to Prezenti (which routes half onward to the Celo Community Fund) your sponsored project receives
-through Celo, and of any grant or prize income you win with the sponsored work.
-Bounded in every direction:
+A good-faith pledge of **2% of revenue** to Prezenti, and to nobody else,
+covering revenue the sponsored project receives through Celo and any grant or
+prize income you win with the sponsored work. Prezenti separately routes half
+of what it receives onward to the Celo Community Fund, equivalent to 1% of
+covered income. Bounded in every direction:
 
 - **Capped at $14,000** — ten times the sponsorship. It cannot exceed that.
 - **Expires 36 months** after the programme ends.
@@ -94,7 +97,7 @@ shipping.
 ```bash
 git clone https://github.com/prezenti/talent-engine
 cd talent-engine
-python3 -m pytest tests/ -q                       # 244 tests, no network needed
+python3 -m pytest tests/ -q                       # 275 tests, no network needed
 export GITHUB_TOKEN=...
 python3 -m talent_engine.cli score \
     --program prezenti-sponsorship-trial --handles YOUR_HANDLE
@@ -213,7 +216,8 @@ configuration lives here.
 |---|---|
 | [RUBRIC.md](RUBRIC.md) | the complete scoring model |
 | [docs/STRATEGY.md](docs/STRATEGY.md) | why these signals, and what an adversary can do to them |
-| [docs/SPONSORSHIP_TERMS.md](docs/SPONSORSHIP_TERMS.md) | why the terms are shaped this way |
+| [docs/SPONSORSHIP_TERMS.md](docs/SPONSORSHIP_TERMS.md) | current terms index |
+| [docs/terms/prezenti-sponsorship-trial-2026-08-13.md](docs/terms/prezenti-sponsorship-trial-2026-08-13.md) | canonical terms release agreed by applicants |
 | [docs/PREZENTI_SPONSORSHIP_TRIAL.md](docs/PREZENTI_SPONSORSHIP_TRIAL.md) | the trial in full |
 | [docs/PROGRAM_LAYER.md](docs/PROGRAM_LAYER.md) | how programmes sit above the score |
 | [docs/ENGINE.md](docs/ENGINE.md) | the engine's own README |
