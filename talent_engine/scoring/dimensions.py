@@ -43,6 +43,10 @@ HALF_REVIEWS = 5.0  # 5 reviews given = half
 # low: a small tool that is genuinely done should keep nearly all its
 # completeness credit, while a decorated repo with two commits should not.
 HALF_COMPLETENESS_COMMITS = 5.0
+# Share of a repo's finishing marks that survive regardless of commit count.
+# Without a floor this dimension re-measures commit volume, which is already
+# 28% of shipping_agency, and punishes small finished work.
+COMPLETENESS_FLOOR = 0.5
 HALF_ECOSYSTEM_HITS = 3.0
 HALF_FRONTIER_HITS = 2.0  # frontier work is rarer, so it saturates sooner
 
@@ -153,9 +157,14 @@ def shipping_agency(
             # higher on completeness than four real projects with 200 commits
             # between them. Scaling by the repo's own activity makes the marks
             # evidence of a finished project rather than of a decorated empty
-            # one. It saturates fast so that a genuinely small, genuinely
-            # finished tool is barely touched.
-            frac *= saturate(r.commits_in_window, HALF_COMPLETENESS_COMMITS)
+            # one. Half the credit is unconditional so that a genuinely small,
+            # genuinely finished tool keeps most of its marks -- scaling the
+            # whole thing by commit count double-counted `commit_volume`, which
+            # is already 28% of this dimension, and took a real three-commit
+            # utility down to 37% of its completeness.
+            frac *= COMPLETENESS_FLOOR + (1.0 - COMPLETENESS_FLOOR) * saturate(
+                r.commits_in_window, HALF_COMPLETENESS_COMMITS
+            )
             fracs.append(frac)
             if marks:
                 evidence.append(
@@ -388,9 +397,14 @@ def collaboration(
 # cheating -- but they cannot carry a dimension on their own.
 SELF_ASSERTED_HIT_WEIGHT = 0.4
 CORROBORATING_PREFIXES = ("org:", "repo:")
+# Commits at which a self-owned taxonomy match has earned back half the gap
+# between the discounted floor and full credit.
+HALF_SELF_ASSERTED_COMMITS = 30.0
 
 
-def _hit_weight(reasons: list[str], *, self_controlled: bool) -> float:
+def _hit_weight(
+    reasons: list[str], *, self_controlled: bool, commits: int = 0
+) -> float:
     """1.0 for a corroborated hit, less for one the candidate asserted itself.
 
     `self_controlled` is decided by *provenance*, not by comparing owner
@@ -409,7 +423,17 @@ def _hit_weight(reasons: list[str], *, self_controlled: bool) -> float:
         return 1.0
     if any(r.startswith(CORROBORATING_PREFIXES) for r in reasons):
         return 1.0
-    return SELF_ASSERTED_HIT_WEIGHT
+    # Substance, not ownership, is what is missing from a keyword-stuffed repo.
+    # A flat discount on everything self-owned would penalise exactly the
+    # independent builder this rubric exists to find -- someone shipping real
+    # ecosystem work in their own repositories, in an ecosystem where that is
+    # simply how work happens, would be capped while an org member was not.
+    # That is the access bias the whole product is against (invariant 1). So
+    # the discount decays with the repository's own commit count: a personal
+    # repo with real work in it earns close to full credit, while five
+    # decorated shells do not.
+    substance = saturate(max(commits, 0), HALF_SELF_ASSERTED_COMMITS)
+    return SELF_ASSERTED_HIT_WEIGHT + (1.0 - SELF_ASSERTED_HIT_WEIGHT) * substance
 
 
 def _taxonomy_hits(
@@ -449,15 +473,23 @@ def _taxonomy_hits(
             r.name,
             r.url,
             reasons,
-            _hit_weight(reasons, self_controlled=True),
+            _hit_weight(reasons, self_controlled=True, commits=r.commits_in_window),
         )
     for pr in snap.merged_prs:
+        # The PR *title* is written by the applicant, so matching a keyword in
+        # it is not corroboration -- titling a typo fix "fix mcp x402 celo
+        # docs" would otherwise launder a self-declared taxonomy term into a
+        # full-weight third-party hit. Only the target repository's own
+        # identity counts at full weight; a title-only match is treated exactly
+        # like a self-declared one.
+        reasons = taxonomy.match_reasons(full_name=pr.repo, description=pr.title)
+        corroborated = any(r.startswith(CORROBORATING_PREFIXES) for r in reasons)
         record(
             pr.repo.lower(),
             pr.repo,
             f"https://github.com/{pr.repo}",
-            taxonomy.match_reasons(full_name=pr.repo, description=pr.title),
-            1.0,
+            reasons,
+            1.0 if corroborated else SELF_ASSERTED_HIT_WEIGHT,
         )
     return list(seen.values())
 

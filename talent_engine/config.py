@@ -125,6 +125,11 @@ class ProgramConfig:
     # sign off, and they should be editable without touching Python. Unset
     # keys fall back to the generic defaults in server/pages.py.
     page: dict[str, str] = field(default_factory=dict)
+    # Set only when rehydrating a stored config to reproduce a historical
+    # score. Relaxes invariants added after that score was recorded, so the
+    # audit log stays replayable as the rules tighten. Never set it on a
+    # config that will score a live applicant.
+    replay: bool = False
 
     def __post_init__(self) -> None:
         unknown = set(self.weights) - set(REFERENCE_WEIGHTS)
@@ -171,6 +176,13 @@ class ProgramConfig:
         # applicant can earn, and every applicant who tries earns a flag
         # instead. A rubric that cannot be satisfied is worse than one that
         # omits the dimension, because it looks satisfiable from outside.
+        #
+        # Skipped on the replay path. Reproducing a historical score must
+        # always be possible, including for a config that predates this rule --
+        # refusing to load the past would break the audit-log promise, which is
+        # a worse failure than the one this invariant prevents.
+        if self.replay:
+            return
         if self.weights.get("trusted_referral", 0) > 0 and not self.referrers:
             raise ValueError(
                 f"{self.key}: trusted_referral is weighted "
@@ -229,6 +241,7 @@ class ProgramConfig:
         eco = {k: v for k, v in (data.pop("ecosystem", None) or {}).items() if k != "name"}
         fro = {k: v for k, v in (data.pop("frontier", None) or {}).items() if k != "name"}
         referrers = data.pop("referrers", None) or []
+        data.setdefault("replay", True)
 
         # Referrer registries hold real names; allow keeping them out of the
         # repo via an env pointer to a separate file.

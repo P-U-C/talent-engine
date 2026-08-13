@@ -14,6 +14,7 @@ candidate's fault.
 from __future__ import annotations
 
 import ipaddress
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -23,6 +24,63 @@ from typing import Any
 # Seconds to wait for a declared homepage to answer. Short on purpose: this is
 # a liveness check inside a collection loop, not a crawl.
 HOMEPAGE_TIMEOUT = 5
+MAX_HOMEPAGE_REDIRECTS = 3
+
+_BLOCKED_HOST_SUFFIXES = (".localhost", ".internal", ".local", ".home.arpa")
+_BLOCKED_HOST_NAMES = ("localhost", "metadata.google.internal")
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never auto-follow. `_homepage_answers` validates each hop itself."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102
+        return None
+
+    opener = None  # populated below
+
+
+_NoRedirect.opener = urllib.request.build_opener(_NoRedirect)
+
+
+def _host_is_public(hostname: str) -> bool:
+    """Reject anything that is not a public unicast address.
+
+    The homepage string is attacker-controlled, so a naive fetch turns the
+    collector into an SSRF probe against its own network. Two traps this has to
+    survive, both of which an earlier version of this function failed:
+
+    *   `ipaddress.ip_address` rejects the numeric forms libc happily accepts --
+        `127.1`, `2130706433`, `0x7f000001`, `0177.0.0.1`. Parsing the literal
+        and treating a `ValueError` as "it must be a hostname" therefore let
+        every one of those through.
+    *   A name is not an address. `evil.example` can resolve to 127.0.0.1, and
+        can answer differently on the second lookup (DNS rebinding).
+
+    So resolve first and judge the resolved addresses, never the string. This
+    still leaves a rebinding window between our resolution and the socket's
+    own; closing that needs a validated-IP connector or egress filtering at the
+    network, which is a deployment concern rather than a scoring one.
+    """
+    host = (hostname or "").strip().rstrip(".").lower()
+    if not host or host in _BLOCKED_HOST_NAMES or host.endswith(_BLOCKED_HOST_SUFFIXES):
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        return False
+    if not infos:
+        return False
+    for info in infos:
+        raw = info[4][0]
+        try:
+            addr = ipaddress.ip_address(raw)
+        except ValueError:
+            return False
+        # `is_global` is False for private, loopback, link-local, reserved,
+        # multicast and unspecified ranges, in both v4 and v6.
+        if not addr.is_global:
+            return False
+    return True
 
 from ..model import (
     Application,
@@ -203,34 +261,39 @@ class Collector:
             return False
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
-        parsed = urllib.parse.urlparse(url)
-        if parsed.scheme not in ("http", "https") or not parsed.hostname:
-            return False
-        # Refuse to fetch anything that is not a public name. The homepage
-        # string is attacker-controlled, so a naive fetch turns the collector
-        # into an SSRF probe against its own network.
-        host = parsed.hostname.lower()
-        if host in ("localhost", "metadata.google.internal") or host.endswith(
-            (".localhost", ".internal", ".local")
-        ):
-            return False
-        try:
-            if ipaddress.ip_address(host).is_global is False:
+
+        # Follow redirects manually, validating every hop. urllib follows them
+        # by default, so a public URL that 302s to 169.254.169.254 would sail
+        # through a check performed only on the first address.
+        for _hop in range(MAX_HOMEPAGE_REDIRECTS + 1):
+            parsed = urllib.parse.urlparse(url)
+            if parsed.scheme not in ("http", "https") or not parsed.hostname:
                 return False
-        except ValueError:
-            pass  # a hostname, not a literal address
-        req = urllib.request.Request(
-            url, method="HEAD", headers={"User-Agent": "talent-engine/homepage-check"}
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=HOMEPAGE_TIMEOUT) as resp:
-                return 200 <= resp.status < 400
-        except urllib.error.HTTPError as exc:
-            # A 4xx/5xx means the host answered but the page is not there.
-            # 405 is the exception: some servers reject HEAD but serve GET.
-            return exc.code == 405
-        except Exception:
-            return False
+            if not _host_is_public(parsed.hostname):
+                return False
+            req = urllib.request.Request(
+                url,
+                method="HEAD",
+                headers={"User-Agent": "talent-engine/homepage-check"},
+            )
+            try:
+                with _NoRedirect.opener.open(req, timeout=HOMEPAGE_TIMEOUT) as resp:
+                    status, location = resp.status, resp.headers.get("Location")
+            except urllib.error.HTTPError as exc:
+                status, location = exc.code, exc.headers.get("Location")
+                if status in (301, 302, 303, 307, 308) and location:
+                    url = urllib.parse.urljoin(url, location)
+                    continue
+                # The host answered but the page is not there. 405 is the
+                # exception: some servers reject HEAD and still serve GET.
+                return status == 405
+            except Exception:
+                return False
+            if status in (301, 302, 303, 307, 308) and location:
+                url = urllib.parse.urljoin(url, location)
+                continue
+            return 200 <= status < 300
+        return False  # redirect budget exhausted
 
     def _collect_merged_prs(self, snap: ProfileSnapshot, since: datetime) -> None:
         query = (
