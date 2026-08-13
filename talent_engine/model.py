@@ -278,6 +278,11 @@ class Application:
     referrer_name: str = ""
     declared_repo: str = ""
     build_plan: str = ""  # collected, surfaced to reviewers, unscored by default
+    # Did the applicant affirmatively accept the programme terms, and which
+    # version. Displaying terms on a page is not agreement; an affirmative act
+    # is, and it has to say what was agreed to or it means nothing later.
+    accepted_terms: bool = False
+    accepted_terms_version: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
 

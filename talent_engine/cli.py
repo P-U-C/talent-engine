@@ -429,6 +429,7 @@ def cmd_serve(args) -> int:
             )
 
     service = IntakeService(
+        overlay=overlay,
         cfg=cfg,
         db_path=args.db,
         collector_factory=lambda: Collector(_client(args), window_days=cfg.window_days),
@@ -465,7 +466,12 @@ def cmd_submissions(args) -> int:
         for r in rows:
             total = "" if r["total"] is None else f"{r['total']:.2f}"
             note = r["error"] or r["run_id"]
-            print(f"{r['received_at']}  {r['status']:<10} {r['handle']:<20} {total:>6}  {note}")
+            app = json.loads(r["application_json"] or "{}")
+            terms = "terms:ok" if app.get("accepted_terms") else "TERMS NOT ACCEPTED"
+            print(
+                f"{r['received_at']}  {r['status']:<10} {r['handle']:<20} {total:>6}  "
+                f"{terms}  {note}"
+            )
             if r["concerns"]:
                 print(f"{'':<26} {r['concerns']}")
     store.close()

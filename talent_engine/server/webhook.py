@@ -59,8 +59,11 @@ class IntakeService:
         db_path: str,
         collector_factory,
         source: str = "tally",
+        overlay=None,
     ) -> None:
         self.cfg = cfg
+        # Used only to stamp which version of the terms an applicant accepted.
+        self.overlay = overlay
         self.db_path = db_path
         self.collector_factory = collector_factory
         self.source = source
@@ -104,6 +107,12 @@ class IntakeService:
         if not sub.submission_id:
             self.rejected += 1
             return "no-submission-id"
+
+        # Stamp WHICH terms were accepted at the moment of acceptance. Without
+        # this, editing the policy silently rewrites what everyone who already
+        # applied is taken to have agreed to.
+        if self.overlay is not None and sub.application.accepted_terms:
+            sub.application.accepted_terms_version = self.overlay.terms_digest()
 
         with self._lock:
             fresh = self._intake_store.record_submission(
