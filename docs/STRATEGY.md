@@ -96,10 +96,43 @@ Cheapest attacks first:
 The last row is the design target. The cheapest way to score well should be to
 do the work.
 
-The residual: **cadence over a long window is expensive to fake, but not
-impossible** — a patient adversary committing weekly for six months scores real
-points. I am comfortable with that. Six months of consistent weekly work *is*
-the signal, whatever the motive.
+The residual used to be stated here as: *cadence over a long window is expensive
+to fake, but not impossible — a patient adversary committing weekly for six
+months scores real points, and I am comfortable with that; six months of
+consistent weekly work is the signal, whatever the motive.*
+
+**That was wrong, and it was the load-bearing assumption.** Cadence was derived
+from `commit.author.date`, which is set by the client. `GIT_AUTHOR_DATE=…
+git commit` in a loop, then one push, produces thirteen distinct weeks spread
+across all three thirds of the window in an afternoon — no elapsed time, no
+second account, no pull requests, nothing for the ring detector to see. The
+`patient_farmer` fixture modelled a cron running for months; it never needed to
+be patient. Two independent adversarial reviews found this within a day of each
+other, which is roughly how long it would take an applicant.
+
+Two things changed:
+
+- The collector **drops commit weeks that predate the repository's own
+  `created_at`**, which GitHub stamps and the applicant cannot move. Backdating
+  into a repository created today now buys nothing, and the discarded commits
+  raise `backdated_history`.
+- Creating empty repositories in advance is free, so foresight still defeats
+  that check — but the forger must still *push* the fabricated history, and
+  `pushed_at` is server-stamped. A wide span of claimed active weeks with every
+  repository last pushed within days of the others raises `unverified_cadence`.
+  It is a review flag rather than a discount, because tidying every repository
+  in one sitting looks identical and a real builder should not lose points for
+  it.
+
+All three manufactured fixtures now trip that flag; neither genuine fixture
+does. That is the flag asymmetry finally pointing the right way — it used to be
+the honest builder who was the only flagged dossier in the pile.
+
+The honest residual now: **cadence is evidence of pushing, not of elapsed
+time.** An adversary who registers repositories months ahead and pushes them on
+separate days still defeats every automated check here. What that costs is
+foresight and calendar discipline, which is a real price but not the six months
+of work the old sentence implied.
 
 ## Known limits — stated, not hidden
 

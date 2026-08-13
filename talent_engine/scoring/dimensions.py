@@ -361,9 +361,20 @@ def collaboration(
     max_pts = cfg.max_points("collaboration")
     given = [r for r in snap.reviews if not r.is_own_repo]
     distinct_repos = {r.repo.lower() for r in given}
+    distinct_owners = {r.split("/")[0] for r in distinct_repos if "/" in r}
     effective = len(distinct_repos) + REPEAT_REPO_WEIGHT * (
         len(given) - len(distinct_repos)
     )
+    # Owners, not just repositories -- the same correction `external_validation`
+    # needs, for the same reason. One accomplice with several repositories is
+    # one relationship, not several, and a two-account cluster sits below the
+    # ring detector's flagging threshold so nothing else will catch it.
+    if distinct_owners:
+        effective = min(
+            effective,
+            len(distinct_owners)
+            + REPEAT_REPO_WEIGHT * (len(distinct_repos) - len(distinct_owners)),
+        )
     frac = saturate(effective, HALF_REVIEWS)
     evidence = [
         Evidence(claim=f"review on {r.repo}#{r.number}", url=r.url) for r in given[:8]
@@ -375,6 +386,7 @@ def collaboration(
         components={
             "reviews_given": float(len(given)),
             "distinct_repos": float(len(distinct_repos)),
+            "distinct_owners": float(len(distinct_owners)),
             "effective": round(effective, 2),
         },
         evidence=evidence,

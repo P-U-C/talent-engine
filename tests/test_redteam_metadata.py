@@ -238,3 +238,84 @@ def test_pr_titles_cannot_launder_taxonomy_credit(cfg):
     hits = _taxonomy_hits(snap, cfg.frontier)
     assert hits, "the title should still match, just not at full weight"
     assert all(w < 1.0 for *_rest, w in hits)
+
+
+# ------------------------------------------------ forged history and PII
+
+def test_backdated_commits_are_excluded_from_cadence():
+    """Commit dates are client-set; a repository's creation date is not.
+
+    `GIT_AUTHOR_DATE=2026-03-09 git commit` plus one push manufactures a
+    six-month cadence with no elapsed time at all, which is what
+    `docs/STRATEGY.md` used to call expensive to fake. A commit cannot
+    legitimately predate the repository holding it, so those weeks are dropped.
+    """
+    from datetime import datetime, timezone
+    from talent_engine.github.collector import _parse
+
+    created = _parse("2026-07-01T00:00:00Z")
+    forged = _parse("2026-03-09T10:00:00Z")
+    assert created and forged and forged < created
+
+
+def test_a_wide_cadence_with_no_push_spread_is_flagged(cfg):
+    """The version that survives pre-created repositories.
+
+    Creating empty repos in advance is free, so the creation-date check alone
+    is beaten by foresight. But the forger still pushes the fabricated history
+    in one sitting, and `pushed_at` is stamped by GitHub.
+    """
+    from talent_engine.scoring.flags import evaluate_flags
+
+    snap = metadata_maximiser()
+    keys = {f.key for f in evaluate_flags(snap, cfg)}
+    assert "unverified_cadence" in keys
+
+
+def test_genuine_profiles_are_not_caught_by_the_cadence_flag(cfg):
+    """The check must not fire on people who actually did the work."""
+    from talent_engine.scoring.flags import evaluate_flags
+
+    for factory in (genuine_builder, quiet_finisher):
+        keys = {f.key for f in evaluate_flags(factory(), cfg)}
+        assert "unverified_cadence" not in keys, f"{factory.__name__} flagged"
+
+
+def test_contact_details_in_free_text_never_reach_the_dossier():
+    """README promises `extra` carries no contact data. A denylist cannot hold.
+
+    The label is innocuous, the field type is not a contact type, and there is
+    no email in it -- so all three existing filters passed this through intact.
+    """
+    from talent_engine.ingest.tally import redact_contacts
+
+    leak = (
+        "Reach me on Telegram @mallory_p or Discord mallory#4021, "
+        "cell +1-415-555-0199."
+    )
+    cleaned = redact_contacts(leak)
+    for secret in ("mallory_p", "mallory#4021", "415", "555", "0199"):
+        assert secret not in cleaned, f"{secret!r} survived redaction"
+    assert "Telegram" in cleaned and "Discord" in cleaned  # substance survives
+
+
+def test_redaction_leaves_ordinary_answers_alone():
+    from talent_engine.ingest.tally import redact_contacts
+
+    text = "I shipped 12 repos in 2026 and about 40 commits, alone, in Lagos."
+    assert redact_contacts(text) == text
+
+
+def test_reviews_from_one_owner_are_not_many_relationships(cfg):
+    """`collaboration` needed the same owner-counting fix as external validation."""
+    from talent_engine.model import ReviewActivity
+
+    snap = metadata_maximiser()
+    snap.reviews = [
+        ReviewActivity(repo=f"one-accomplice/repo-{i}", number=i,
+                       submitted_at=_iso(2026, 4, 1 + i))
+        for i in range(5)
+    ]
+    dim = score(snap, cfg).dimension("collaboration")
+    assert dim.components["distinct_owners"] == 1.0
+    assert dim.components["effective"] < dim.components["distinct_repos"]

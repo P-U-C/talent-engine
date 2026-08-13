@@ -16,6 +16,15 @@ Attack surface considered, cheapest first:
   invented referrer              -> exact-match registry, zero + flag
   many empty repos               -> completeness component, not repo count
   stars/followers                -> not scored anywhere in the rubric
+  backdated commit history       -> weeks before repo creation are dropped
+  bulk-pushed forged cadence     -> `unverified_cadence`
+
+The last two exist because `docs/STRATEGY.md` used to rest on cadence being
+expensive to fake -- "six months of consistent weekly work IS the signal".
+It is not, on its own. Git commit dates are client-set, so `GIT_AUTHOR_DATE`
+plus one push manufactures any cadence in an afternoon. The collector now drops
+weeks that precede the repository's server-stamped creation, and the flag below
+catches the version where the repositories were created in advance.
 """
 
 from __future__ import annotations
@@ -151,6 +160,65 @@ def evaluate_flags(snap: ProfileSnapshot, cfg: ProgramConfig) -> list[Flag]:
             )
         )
 
+    # --- forged history ----------------------------------------------------
+    # Commit dates are the one scored input the applicant owns outright. The
+    # collector already drops weeks that precede a repository's server-stamped
+    # creation; this reports that it happened, because a profile whose claimed
+    # history predates the repositories holding it is either imported work or
+    # fabricated, and a reviewer needs to know which.
+    backdated = sum(r.backdated_commits for r in snap.repos)
+    if backdated and backdated >= max(3, 0.2 * (backdated + _counted_commits(snap))):
+        flags.append(
+            Flag(
+                key="backdated_history",
+                severity="review",
+                message=(
+                    f"{backdated} commits are dated before the repository that "
+                    "holds them existed. Commit dates are set by the client, so "
+                    "they cannot evidence when the work happened; those weeks are "
+                    "excluded from cadence."
+                ),
+                evidence=(
+                    Evidence(
+                        claim=f"{backdated} commits predate their repository",
+                        url=f"{snap.profile_url}?tab=repositories",
+                    ),
+                ),
+            )
+        )
+
+    # A cadence claim with no server-stamped spread behind it. Creating empty
+    # repositories in advance is free, so the `created_at` check above is
+    # defeated by six months of foresight -- but the forger still has to push
+    # the fabricated history, and they push it all at once. A genuine builder
+    # working weekly across several repositories leaves their last pushes
+    # scattered; someone who backdated everything on Sunday does not. This is
+    # a review flag, never a discount: the pattern is suggestive, not proof,
+    # and a real builder who tidied every repo in one sitting looks the same.
+    spread_days = _push_spread_days(snap)
+    weeks = len(snap.active_weeks)
+    if weeks >= 8 and spread_days is not None and spread_days <= 3:
+        flags.append(
+            Flag(
+                key="unverified_cadence",
+                severity="review",
+                message=(
+                    f"{weeks} active weeks are claimed, but every original "
+                    f"repository was last pushed within {spread_days} day(s) of the "
+                    "others. Commit dates are client-set, so a wide cadence with no "
+                    "spread in server-stamped pushes is what bulk-backdated history "
+                    "looks like. It is also what tidying everything in one sitting "
+                    "looks like -- check the push history before concluding."
+                ),
+                evidence=(
+                    Evidence(
+                        claim=f"{weeks} claimed weeks, pushes span {spread_days} day(s)",
+                        url=f"{snap.profile_url}?tab=repositories",
+                    ),
+                ),
+            )
+        )
+
     # --- fork-heavy profile ------------------------------------------------
     forks = [r for r in snap.repos if r.is_fork]
     if forks and len(snap.original_repos) == 0 and len(forks) >= 3:
@@ -206,3 +274,28 @@ def discount_for(flags: list[Flag], component: str) -> float:
 
 def has_flag(flags: list[Flag], key: str) -> bool:
     return any(f.key == key for f in flags)
+
+
+def _counted_commits(snap: ProfileSnapshot) -> int:
+    """Commits that survived the backdating filter."""
+    return sum(r.commits_in_window - r.backdated_commits for r in snap.repos)
+
+
+def _push_spread_days(snap: ProfileSnapshot) -> float | None:
+    """Days between the earliest and latest last-push across original repos.
+
+    `pushed_at` is server-stamped, so unlike a commit date the applicant cannot
+    choose it. Needs at least two repositories to mean anything.
+    """
+    from datetime import datetime
+
+    stamps = []
+    for r in snap.original_repos:
+        raw = (r.pushed_at or "").replace("Z", "+00:00")
+        try:
+            stamps.append(datetime.fromisoformat(raw))
+        except ValueError:
+            continue
+    if len(stamps) < 2:
+        return None
+    return (max(stamps) - min(stamps)).total_seconds() / 86400.0

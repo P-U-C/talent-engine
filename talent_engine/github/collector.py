@@ -223,6 +223,16 @@ class Collector:
     ) -> None:
         weeks: list[str] = []
         count = 0
+        backdated = 0
+        # A commit cannot legitimately predate the repository that holds it,
+        # except through imported history -- and imported history says nothing
+        # about when the applicant did the work. Both `author.date` and
+        # `committer.date` are set by the client (`GIT_AUTHOR_DATE`), so an
+        # afternoon of backdated commits and one push otherwise manufactures a
+        # six-month cadence with no elapsed time at all. `created_at` is
+        # server-stamped and is the cheapest thing we already hold that the
+        # applicant cannot move.
+        created = _parse(repo.created_at)
         for raw in self.client.paginate(
             f"/repos/{repo.name}/commits",
             {"author": snap.handle, "since": since.isoformat()},
@@ -233,10 +243,15 @@ class Collector:
                 ((raw.get("commit") or {}).get("author") or {}).get("date")
                 or ((raw.get("commit") or {}).get("committer") or {}).get("date")
             )
+            authored = _parse(date)
+            if created and authored and authored < created:
+                backdated += 1
+                continue  # unverifiable as evidence of when work happened
             wk = iso_week(date)
             if wk:
                 weeks.append(wk)
         repo.commits_in_window = count
+        repo.backdated_commits = backdated
         repo.commit_weeks = sorted(set(weeks))
 
     def _has_releases(self, full_name: str) -> bool:

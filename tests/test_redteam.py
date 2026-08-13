@@ -58,19 +58,38 @@ def test_the_naive_attack_is_still_crushed(cfg):
 # ------------------------------------------- what the flags do NOT catch
 
 
-def test_patient_farming_raises_no_flag_at_all(cfg):
-    """Every authenticity check keys on concentration; slowness defeats all of them.
+def test_patient_farming_is_now_flagged_and_honest_profiles_are_not(cfg):
+    """This test used to assert the opposite, and that was the whole problem.
 
-    Mitigation if this is unacceptable: the checks need a signal that is not
-    about timing — commit content, diff size distribution, or whether anyone
-    other than the author has ever interacted with the repositories.
+    Every authenticity check keyed on *concentration* — a fresh account, a
+    burst of weeks, implausible commits per week — so slowness defeated all of
+    them and `patient_farmer` passed cleanly while the genuine builder was the
+    only profile flagged, for honestly naming a referrer.
+
+    `unverified_cadence` is the signal that is not about concentration. It asks
+    whether the claimed cadence is corroborated by anything the applicant
+    cannot set: commit dates are client-side (`GIT_AUTHOR_DATE`), but
+    `pushed_at` is stamped by GitHub. A wide span of active weeks with every
+    repository last pushed inside a couple of days is what bulk-backdated
+    history looks like.
+
+    The asymmetry now runs the right way: all three manufactured fixtures trip
+    it, and neither genuine fixture does.
     """
-    farmed = score(patient_farmer(), cfg)
-    triggered = [f.key for f in farmed.flags]
-    assert triggered == [], (
-        f"patient_farmer now trips {triggered} — if that is a new countermeasure, "
-        "update this test; it previously passed every check cleanly"
-    )
+    manufactured = {
+        "patient_farmer": patient_farmer(),
+        "sockpuppet_ring": sockpuppet_ring(),
+    }
+    for name, snap in manufactured.items():
+        keys = {f.key for f in score(snap, cfg).flags}
+        assert "unverified_cadence" in keys, f"{name} is no longer flagged: {keys}"
+
+    for name, snap in {
+        "genuine_builder": genuine_builder(),
+        "quiet_finisher": quiet_finisher(),
+    }.items():
+        keys = {f.key for f in score(snap, cfg).flags}
+        assert keys == set(), f"{name} was flagged, which is the old bug: {keys}"
 
 
 def test_patient_farming_outscores_a_real_low_volume_builder(cfg):
@@ -159,8 +178,12 @@ def test_declaring_a_referrer_is_no_longer_the_loudest_signal(cfg):
     the check means anything.
     """
     assert {f.key for f in score(genuine_builder(), cfg).flags} == set()
-    assert {f.key for f in score(sockpuppet_ring(), cfg).flags} == set()
-    assert {f.key for f in score(patient_farmer(), cfg).flags} == set()
+    # The manufactured profiles are no longer clean either -- they now trip
+    # `unverified_cadence` -- but the property under test here is only that the
+    # honest profile is not the loudest dossier in the pile.
+    assert "unverifiable_referrer" not in {
+        f.key for f in score(genuine_builder(), cfg).flags
+    }
 
 
 def test_an_unverifiable_referrer_still_flags_where_a_registry_exists(cfg_with_registry):

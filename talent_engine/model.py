@@ -237,6 +237,13 @@ class RepoActivity:
     license: str | None = None
     commits_in_window: int = 0
     commit_weeks: list[str] = field(default_factory=list)
+    # Commits whose authored date precedes the repository's own creation.
+    # Git commit dates are client-set (`GIT_AUTHOR_DATE`), so they are the one
+    # input an applicant fully controls. A date earlier than the repository
+    # existed is either imported history or fabrication; either way it cannot
+    # evidence *when work happened*, so those weeks are excluded from cadence
+    # and counted here instead.
+    backdated_commits: int = 0
 
     @property
     def url(self) -> str:

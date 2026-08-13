@@ -73,6 +73,15 @@ Full marks at 13 active weeks.
 Measured in weeks, never in commits, because a week cannot be inflated by
 splitting the same work into more commits.
 
+**A week only counts if the commit is dated after the repository holding it was
+created.** Git commit dates are set by whoever runs `git commit`, so they are
+the one scored input you fully control; a repository's creation date is stamped
+by GitHub and is not. Commits dated before their repository existed are either
+imported history or fabricated, and neither evidences when the work happened,
+so they are excluded here and raise `backdated_history`. If you migrated a
+project into a new repository, that history is real but unverifiable from the
+outside — say so in your application and it will be read by a human.
+
 Multiplied by a *spread* factor based on how much of the window your activity
 covers: all three thirds = 1.0, two thirds = 0.85, one third = 0.70. One hot
 month does not read as six consistent ones.
@@ -161,6 +170,8 @@ anything.
 | `metric_inflation` | ≥60 commits per active week |
 | `unverifiable_referrer` | declared referrer not on the registry |
 | `fork_shell_profile` | ≥3 forks and no original repos |
+| `backdated_history` | a material share of commits predate their own repository |
+| `unverified_cadence` | ≥8 active weeks claimed, but every repo was last pushed within 3 days of the others |
 | `partial_data` | *our* collection was incomplete — not about you |
 
 `burst_activity` is the only flag that discounts: it cuts the commit_volume

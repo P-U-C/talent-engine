@@ -61,6 +61,47 @@ CONTACT_TYPES = {"INPUT_EMAIL", "INPUT_PHONE_NUMBER"}
 
 _EMAILISH = re.compile(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}")
 
+# Contact shapes that survive inside free text. A label denylist cannot win
+# here: the leak is not a mis-labelled contact field, it is someone typing
+# "reach me on Telegram @x, cell +1-415-555-0199" into "anything else you want
+# us to know". Dropping the whole answer would lose the substance a reviewer is
+# meant to read, so each shape is redacted in place and only an answer that
+# becomes empty is dropped.
+_CONTACT_SHAPES: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+    ("[email redacted]", _EMAILISH),
+    # discord.gg/…, t.me/…, wa.me/…, signal.me/…, and bare handles on those.
+    (
+        "[link redacted]",
+        re.compile(
+            r"\b(?:https?://)?(?:www\.)?"
+            r"(?:t\.me|telegram\.me|wa\.me|discord\.gg|signal\.me|m\.me)/\S+",
+            re.I,
+        ),
+    ),
+    # Discord's legacy name#1234 form.
+    ("[handle redacted]", re.compile(r"\b[\w.]{2,32}#\d{4}\b")),
+    # Telegram/X/Discord style @handle. Deliberately broad: losing an
+    # occasional "@someorg" from an operator's reading copy is a far smaller
+    # harm than publishing a way to contact the applicant off-platform.
+    ("[handle redacted]", re.compile(r"(?<![\w/])@[A-Za-z0-9_]{3,32}\b")),
+    # Phone numbers: optional +country, then 7+ digits with common separators.
+    # Boundaries are digit-based, not word-based: `(?![\w.])` treated a
+    # sentence-ending full stop as part of the number and backtracked, leaving
+    # the last group of "+1-415-555-0199." unredacted.
+    (
+        "[phone redacted]",
+        re.compile(r"(?<![\w.])\+?\d[\d\s().-]{6,}\d(?!\d)"),
+    ),
+)
+
+
+def redact_contacts(text: str) -> str:
+    """Strip contact shapes from free text, preserving everything else."""
+    out = text
+    for replacement, pattern in _CONTACT_SHAPES:
+        out = pattern.sub(replacement, out)
+    return re.sub(r"\s{2,}", " ", out).strip()
+
 
 class TallyPayloadError(ValueError):
     """The body is not a Tally form-response webhook we can read."""
@@ -283,10 +324,19 @@ def _first_email(values: list[tuple[str, str, Any]]) -> str:
 def _safe_extra(values: list[tuple[str, str, Any]]) -> dict[str, Any]:
     """Everything else the form asked, minus anything identifying.
 
-    Three filters, because any one of them alone leaks: the declared contact
+    Four filters, because any one of them alone leaks: the declared contact
     labels, Tally's contact field *types* (a form author can label an email
-    field "how do we reach you"), and finally a value-shape check for
-    address-like strings that slipped through both.
+    field "how do we reach you"), a value-shape check for address-like strings
+    that slipped through both, and finally redaction *within* free text.
+
+    That last one is the case the first three cannot reach. An answer to
+    "anything else you want us to know" reading "reach me on Telegram
+    @mallory_p or Discord mallory#4021, cell +1-415-555-0199" has a
+    non-contact label, a non-contact type, and no email in it, and so used to
+    land intact in `Application.extra` -- which travels into the snapshot and
+    the dossier that README.md promises never carries contact data. Dropping
+    the whole answer would throw away the substance the reviewer is meant to
+    read, so the contact shapes are removed and the rest survives.
     """
     extra: dict[str, Any] = {}
     for label, ftype, value in values:
@@ -295,7 +345,10 @@ def _safe_extra(values: list[tuple[str, str, Any]]) -> dict[str, Any]:
             continue
         if ftype in CONTACT_TYPES or _match(label, CONTACT_KEYS):
             continue
-        if _EMAILISH.search(flat):
+        if _EMAILISH.search(flat) and _EMAILISH.sub("", flat).strip() == "":
+            continue  # the whole answer was an address
+        cleaned = redact_contacts(flat)
+        if not cleaned:
             continue
-        extra[label] = flat
+        extra[label] = cleaned
     return extra
