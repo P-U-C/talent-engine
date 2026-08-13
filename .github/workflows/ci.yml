@@ -18,9 +18,42 @@ jobs:
           python-version: "3.12"
 
       # The scoring core is standard library only and the suite makes no
-      # network calls, so there is nothing to install.
+      # network calls -- but the runner still needs pytest itself.
+      - name: Install test runner
+        run: python3 -m pip install --disable-pip-version-check --quiet pytest
+
       - name: Tests
         run: python3 -m pytest -q
+
+      # The product claim is that the engine has no runtime dependencies. Assert
+      # it rather than trusting the comment above: import the scoring path in a
+      # fresh interpreter with only the standard library and pytest present.
+      - name: Scoring core imports with no third-party dependencies
+        run: |
+          python3 - <<'PY'
+          import sys
+          before = set(sys.modules)
+          from talent_engine.scoring.engine import score_snapshot  # noqa: F401
+          from talent_engine.config import load_program            # noqa: F401
+          import pathlib, sysconfig
+          stdlib = pathlib.Path(sysconfig.get_paths()["stdlib"]).resolve()
+          here = pathlib.Path.cwd().resolve()
+          leaked = []
+          for name in set(sys.modules) - before:
+              mod = sys.modules[name]
+              path = getattr(mod, "__file__", None)
+              if not path:
+                  continue
+              p = pathlib.Path(path).resolve()
+              if stdlib in p.parents or here in p.parents:
+                  continue
+              leaked.append(f"{name} -> {p}")
+          if leaked:
+              print("third-party imports in the scoring path:")
+              print("\n".join(sorted(leaked)))
+              raise SystemExit(1)
+          print("ok: scoring core is standard library only")
+          PY
 
       # RUBRIC.md is the promise that a candidate can reproduce their own
       # score. It silently documented one programme's weights while a
