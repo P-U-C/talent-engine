@@ -57,6 +57,30 @@ def build_blocks(spec: dict) -> list[dict]:
     )
 
     for q in spec["questions"]:
+        # Hidden fields are not question blocks in Tally: they are declared on
+        # the form and populated from the query string, and they come back in
+        # the webhook alongside the answers. `terms_version` is one, so that
+        # the submission records the digest of the terms the page actually
+        # rendered rather than whatever the server considers current when the
+        # webhook lands.
+        #
+        # UNVERIFIED against the live API — written without a TALLY_API_KEY to
+        # test with. If Tally rejects this block, add the hidden field named
+        # `terms_version` in the form's settings by hand; the engine only cares
+        # that a field labelled "Terms version" arrives in the payload.
+        if q["type"] == "HIDDEN":
+            hidden_uuid = _uuid()
+            blocks.append(
+                {
+                    "uuid": hidden_uuid,
+                    "type": "HIDDEN_FIELDS",
+                    "groupUuid": hidden_uuid,
+                    "groupType": "HIDDEN_FIELDS",
+                    "payload": {"hiddenFields": [{"uuid": _uuid(), "name": q["label"]}]},
+                }
+            )
+            continue
+
         # The label block. This is what arrives as `label` in the webhook and
         # what the parser matches on — see forms/*.json for why it is fixed.
         label_uuid = _uuid()
