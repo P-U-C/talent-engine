@@ -10,7 +10,7 @@ which means a lawyer should read the final wording — see *Gaps* at the end.
 
 ## The offer
 
-Five places, four months, $1,400 per person: Claude Max 20x and ChatGPT Pro for
+Five places, four months, $1,400 per person: Claude Max 20x and ChatGPT Pro 5x for
 the term, plus a $200 one-off allowance. $7,000 total.
 
 ## The give-back
