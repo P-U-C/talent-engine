@@ -50,11 +50,13 @@ def build_payload(spec) -> dict:
                 {"id": f"opt_{i}_{j}", "text": text}
                 for j, text in enumerate(q.get("options", []))
             ]
+            # Tick the first two where there are two, otherwise the only one.
+            ticked = [o["id"] for o in options[:2]]
             field = {
                 "key": f"question_{i}",
                 "label": q["label"],
                 "type": "CHECKBOX",
-                "value": [options[0]["id"], options[1]["id"]],
+                "value": ticked,
                 "options": options,
             }
         else:
@@ -82,6 +84,7 @@ def test_every_declared_mapping_actually_resolves(spec):
 
     resolved = {
         "handle": sub.handle,
+        "application.accepted_terms": app.accepted_terms,
         "contact.name": contact.name,
         "contact.email": contact.email,
         "contact.telegram": contact.telegram,
@@ -149,3 +152,51 @@ def test_every_question_documents_why_it_is_asked(spec):
     """A form that collects something nobody can justify is how scope creeps."""
     for q in spec["questions"]:
         assert q.get("why"), f"{q['label']!r} has no stated purpose"
+
+
+# ------------------------------------------------- affirmative acceptance
+
+
+def test_the_form_asks_for_terms_acceptance_and_it_is_required(spec):
+    """Agreement has to be an act the applicant performs, not a page they load."""
+    terms = [q for q in spec["questions"] if q["maps_to"] == "application.accepted_terms"]
+    assert len(terms) == 1
+    assert terms[0]["required"]
+    assert terms[0]["type"] == "CHECKBOX"
+
+
+def test_the_checkbox_restates_the_terms_rather_than_linking_to_them(spec):
+    """Nobody should be able to accept a link they did not open."""
+    terms = next(q for q in spec["questions"] if q["maps_to"] == "application.accepted_terms")
+    text = " ".join(terms["options"]).lower()
+    for substance in ("2%", "$14,000", "36 months", "no equity", "withdraw"):
+        assert substance in text, f"the checkbox does not state {substance}"
+
+
+def test_an_unticked_box_is_not_acceptance(spec):
+    """Silence must never be read as agreement."""
+    payload = build_payload(spec)
+    for field in payload["data"]["fields"]:
+        if "accept the sponsorship terms" in field["label"].lower():
+            field["value"] = []
+    assert parse_webhook(payload).application.accepted_terms is False
+
+
+def test_acceptance_is_stamped_with_the_version_accepted(tmp_path, spec):
+    """Editing the policy must not rewrite what past applicants agreed to."""
+    from talent_engine.config import load_program
+    from talent_engine.programs import load_overlay
+    from talent_engine.server.webhook import IntakeService
+
+    overlay = load_overlay("prezenti-sponsorship-trial")
+    service = IntakeService(
+        load_program("prezenti-sponsorship-trial"),
+        str(tmp_path / "t.db"),
+        collector_factory=lambda: None,
+        overlay=overlay,
+    )
+    sub = parse_webhook(build_payload(spec))
+    service.accept(sub)
+    assert sub.application.accepted_terms
+    assert sub.application.accepted_terms_version == overlay.terms_digest()
+    assert len(sub.application.accepted_terms_version) == 12

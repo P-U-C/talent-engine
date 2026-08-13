@@ -86,6 +86,16 @@
       "required": false,
       "maps_to": "application.context_statement",
       "why": "Capped by the rubric weight and disabled entirely for recruitment-mode programs. Self-declared and unverifiable by design."
+    },
+    {
+      "label": "Do you accept the sponsorship terms?",
+      "type": "CHECKBOX",
+      "required": true,
+      "maps_to": "application.accepted_terms",
+      "options": [
+        "I have read the terms at sponsorships.prezenti.xyz and I accept them: 2% of Celo revenue and grant income, capped at $14,000, expiring 36 months after the term, pro-rated by the months I receive. No equity is taken. I keep all IP and may withdraw at any time without penalty."
+      ],
+      "why": "Terms displayed on a page are not agreement; an affirmative act is. The option text restates the substance so nobody accepts a link they did not open, and the version accepted is stamped on the submission — otherwise editing the policy silently rewrites what everyone who already applied is taken to have agreed to."
     }
   ]
 }

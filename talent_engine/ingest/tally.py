@@ -46,6 +46,15 @@ X_KEYS = ("x", "twitter", "x handle", "twitter handle", "x / twitter")
 DISCORD_KEYS = ("discord", "discord handle")
 CONTACT_KEYS = EMAIL_KEYS + NAME_KEYS + TELEGRAM_KEYS + X_KEYS + DISCORD_KEYS
 
+# The affirmative acceptance of the programme terms. Ordered most specific
+# first, because "agree" and "terms" are words that appear in other questions.
+TERMS_KEYS = (
+    "accept the sponsorship terms",
+    "accept the terms",
+    "agree to the terms",
+    "terms",
+)
+
 # Field types Tally uses for contact information, regardless of the label the
 # form author typed.
 CONTACT_TYPES = {"INPUT_EMAIL", "INPUT_PHONE_NUMBER"}
@@ -223,7 +232,14 @@ def parse_webhook(payload: dict[str, Any]) -> Submission:
         discord=pick(DISCORD_KEYS),
     )
 
+    # A ticked checkbox arrives as the option text, an unticked one as empty.
+    # Anything other than a positive value is treated as NOT accepted: silence
+    # must never be read as agreement.
+    terms_raw = pick(TERMS_KEYS)
+    accepted = bool(terms_raw) and terms_raw.strip().lower() not in ("no", "false", "0")
+
     application = Application(
+        accepted_terms=accepted,
         context_statement=pick(CONTEXT_KEYS),
         context_factors=pick_list(FACTOR_KEYS),
         referrer_name=pick(REFERRER_KEYS),

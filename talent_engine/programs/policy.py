@@ -9,6 +9,7 @@ points in the technical rubric.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -138,6 +139,30 @@ class ProgramOverlay:
     @property
     def is_open(self) -> bool:
         return self.status == "open"
+
+    def terms_digest(self) -> str:
+        """A short, stable fingerprint of the terms a person is agreeing to.
+
+        Recorded with each acceptance so that "they accepted the terms" means
+        something specific later. Without it, a change to the policy silently
+        rewrites what everyone who already applied is taken to have agreed to,
+        and nobody can tell afterwards which version they saw.
+
+        Derived from the substantive terms only — the give-back, the upside
+        instrument, and the commitments owed to the recipient. Editing the
+        headline copy or the seat count does not invalidate an agreement about
+        obligations.
+        """
+        payload = json.dumps(
+            {
+                "giveback": self.giveback,
+                "upside": self.upside,
+                "commitments_to_recipient": self.commitments_to_recipient,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode()).hexdigest()[:12]
 
     def terms_summary(self) -> list[str]:
         """The terms in one place, for logs and for the public page.

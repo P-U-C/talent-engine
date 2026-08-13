@@ -84,6 +84,24 @@ For scale: $1,400 for 2% implies a $70,000 valuation on the claim. It is not
 equity, so the comparison is imperfect, but it is worth seeing before deciding
 the terms are generous.
 
+## How agreement is recorded
+
+Displaying terms on a page is not agreement. The application form carries a
+**required checkbox** that restates the substance — 2%, the $14,000 cap, the
+36-month sunset, the pro-rating, no equity, IP retained, withdrawal without
+penalty — so nobody can accept a link they did not open.
+
+Silence is never read as agreement: an unticked box, an empty value, or an
+absent field all record as *not accepted*, and `talent-engine submissions`
+prints `TERMS NOT ACCEPTED` in that case rather than staying quiet.
+
+Each acceptance is stamped with `terms_digest()`, a fingerprint of the
+substantive terms — the give-back, the upside instrument, and the commitments
+owed to the recipient. Without it, editing the policy would silently rewrite
+what everyone who already applied is taken to have agreed to, and nobody could
+tell afterwards which version they saw. Editing headline copy or the seat count
+does not invalidate an existing agreement; changing an obligation does.
+
 ## Enforcement in code
 
 `ProgramOverlay.__post_init__` refuses to load a policy that:
