@@ -19,7 +19,7 @@ revenue-producing products on Celo.
 Each recipient may claim:
 
 - Claude Max 20x at up to $200 per month for four months;
-- ChatGPT Pro at up to $100 per month for four months; and
+- ChatGPT Pro 5x at up to $100 per month for four months; and
 - a $200 flexible allowance across the term.
 
 The maximum support is $1,400 per recipient, reimbursed against monthly
@@ -115,7 +115,7 @@ The trial will report:
 
 | item | per person | five recipients |
 |---|---:|---:|
-| Claude Max 20x + ChatGPT Pro, four months | $1,200 | $6,000 |
+| Claude Max 20x + ChatGPT Pro 5x, four months | $1,200 | $6,000 |
 | Flexible allowance | $200 | $1,000 |
 | **Maximum** | **$1,400** | **$7,000** |
 

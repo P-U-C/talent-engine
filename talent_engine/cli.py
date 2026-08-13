@@ -28,6 +28,8 @@ from .modes.monitor import assess, measure as measure_deltas
 from .modes.scout import Scout
 from .report import dossier, ranked_table, scores_to_csv, scores_to_json
 from .scoring.concerns import concerns
+from .modes.gates import HUMAN_GATES
+from .store.db import LEDGER_TYPES
 from .scoring.engine import CODE_VERSION, rank, score_snapshot
 from .store.db import Store
 
@@ -274,6 +276,85 @@ def cmd_feedback_queue(args) -> int:
     return 1 if pending else 0
 
 
+def cmd_track(args) -> int:
+    """Append an operating entry: receipts, reimbursements, checkpoints, KPIs."""
+    cfg = load_program(args.program)
+    store = Store(args.db)
+    handle = normalize_handle(args.handle) if args.handle else ""
+    entry_id = store.record_ledger_entry(
+        cfg.key,
+        args.type,
+        args.owner,
+        handle=handle or "",
+        period=args.period or "",
+        amount_usd=args.amount,
+        reference=args.reference or "",
+        note=args.note or "",
+    )
+    print(f"recorded {args.type} for {handle or cfg.key} (owner: {args.owner})")
+    print(f"  {entry_id}")
+    store.close()
+    return 0
+
+
+def cmd_tracker(args) -> int:
+    """What has been done for each recipient, and what has not."""
+    import json as _json
+
+    cfg = load_program(args.program)
+    store = Store(args.db)
+    summary = store.ledger_summary(cfg.key)
+    if args.format == "json":
+        print(_json.dumps(summary, indent=2))
+        store.close()
+        return 0
+    print(f"Operating tracker — {cfg.key}")
+    if summary["totals"]:
+        print("  totals: " + ", ".join(f"{k} ${v:,.2f}" for k, v in summary["totals"].items()))
+    if not summary["recipients"]:
+        print("  (no cohort yet)")
+    for handle, r in summary["recipients"].items():
+        owners = ", ".join(r["owners"]) or "nobody"
+        print(f"\n  {handle}  ({r['entries']} entries, owners: {owners})")
+        print(f"    reimbursed: ${r['reimbursed_usd']:,.2f}")
+        if r["missing"]:
+            print(f"    MISSING: {', '.join(r['missing'])}")
+    store.close()
+    return 0
+
+
+def cmd_signoff(args) -> int:
+    """Record that a named person checked a human gate."""
+    from .modes.gates import GATE_LABELS
+
+    cfg = load_program(args.program)
+    store = Store(args.db)
+    handle = normalize_handle(args.handle) or args.handle
+    store.record_signoff(cfg.key, handle, args.gate, args.steward, args.note)
+    print(f"{handle}: {GATE_LABELS[args.gate]} — signed off by {args.steward}")
+    store.close()
+    return 0
+
+
+def cmd_gates(args) -> int:
+    """Show every acceptance gate and whether it is met."""
+    from .modes import gates as gate_checks
+    from .programs.policy import load_overlay
+
+    cfg = load_program(args.program)
+    overlay = load_overlay(args.overlay or args.program)
+    store = Store(args.db)
+    handle = normalize_handle(args.handle) or args.handle
+    checked = gate_checks.evaluate(store, cfg.key, handle, overlay.terms_digest())
+    print(gate_checks.render(checked))
+    unmet = gate_checks.failing(checked)
+    print(f"\n{len(checked) - len(unmet)}/{len(checked)} gates met.")
+    for o in store.overrides(cfg.key, handle):
+        print(f"  override: {o['gates']} by {o['steward']} — {o['reason']}")
+    store.close()
+    return 1 if unmet else 0
+
+
 def cmd_accept(args) -> int:
     """Record an acceptance and produce the letter. Deploys nothing."""
     from .modes.acceptance import acceptance_letter, split_plan
@@ -283,7 +364,47 @@ def cmd_accept(args) -> int:
     overlay = load_overlay(args.overlay or args.program)
     store = Store(args.db)
 
+    from .modes import gates as gate_checks
+
     handle = normalize_handle(args.handle) or args.handle
+
+    # Fail closed. `--select` used to be enough to accept an arbitrary handle
+    # with no scored application, no recorded terms acceptance and none of the
+    # programme's human checks -- and it printed the full acceptance letter.
+    checked = gate_checks.evaluate(store, cfg.key, handle, overlay.terms_digest())
+    unmet = gate_checks.failing(checked)
+    if unmet:
+        print("--- acceptance gates -------------------------------------------")
+        print(gate_checks.render(checked))
+        if not args.override:
+            print(
+                f"\n{handle} does not clear {len(unmet)} gate(s), so no acceptance "
+                "was recorded and no letter was produced.\n"
+                "Record the human checks with `talent-engine signoff`, or, if this "
+                "is a deliberate exception, re-run with:\n"
+                "  --override --steward <who> --reason <why>\n"
+                "An override is written to the audit log and named in the letter.",
+                file=sys.stderr,
+            )
+            store.close()
+            return 2
+        if not (args.steward and args.reason):
+            print(
+                "--override requires --steward and --reason. An exception with no "
+                "author and no stated reason is indistinguishable from a bug.",
+                file=sys.stderr,
+            )
+            store.close()
+            return 2
+        store.record_override(
+            cfg.key, handle, [g.key for g in unmet], args.steward, args.reason
+        )
+        print(
+            f"\nOVERRIDDEN by {args.steward}: {args.reason}\n"
+            "Recorded in gate_overrides.",
+            file=sys.stderr,
+        )
+
     if not any(m["handle"] == handle for m in store.cohort(cfg.key)):
         if not args.select:
             print(
@@ -558,7 +679,47 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="also add them to the cohort (selection is otherwise a separate decision)",
     )
+    s.add_argument(
+        "--override",
+        action="store_true",
+        help="proceed despite failing gates; requires --steward and --reason",
+    )
+    s.add_argument("--steward", help="who is taking responsibility for an override")
+    s.add_argument("--reason", help="why the override is justified")
     s.set_defaults(func=cmd_accept)
+
+    s = sub.add_parser(
+        "signoff",
+        help="record a human acceptance gate (access barrier, build plan, Celo fit, conflict)",
+    )
+    s.add_argument("--program", required=True)
+    s.add_argument("--handle", required=True)
+    s.add_argument("--gate", required=True, choices=list(HUMAN_GATES))
+    s.add_argument("--steward", required=True, help="who checked it")
+    s.add_argument("--note", default="", help="what they concluded")
+    s.set_defaults(func=cmd_signoff)
+
+    s = sub.add_parser("track", help="record an operating entry (receipt, KPI, ...)")
+    s.add_argument("--program", required=True)
+    s.add_argument("--type", required=True, choices=list(LEDGER_TYPES))
+    s.add_argument("--owner", required=True, help="who is accountable for this line")
+    s.add_argument("--handle", help="recipient, if this is not programme-level")
+    s.add_argument("--period", help="'YYYY-MM' or a milestone key")
+    s.add_argument("--amount", type=float, help="USD, where the entry is financial")
+    s.add_argument("--reference", help="receipt id, tx hash, or post URL")
+    s.add_argument("--note", default="")
+    s.set_defaults(func=cmd_track)
+
+    s = sub.add_parser("tracker", help="what is done and what is outstanding")
+    s.add_argument("--program", required=True)
+    s.add_argument("--format", choices=["table", "json"], default="table")
+    s.set_defaults(func=cmd_tracker)
+
+    s = sub.add_parser("gates", help="show acceptance gate status for a candidate")
+    s.add_argument("--program", required=True)
+    s.add_argument("--handle", required=True)
+    s.add_argument("--overlay", help="policy key, if it differs from --program")
+    s.set_defaults(func=cmd_gates)
 
     s = sub.add_parser(
         "rings", help="relationships between applicants (needs a pool, not one profile)"

@@ -36,20 +36,20 @@ export GITHUB_TOKEN=...        # or GITHUB_APP_ID + GITHUB_APP_INSTALLATION_ID
                                #    + GITHUB_APP_PRIVATE_KEY_PATH
 
 # score an applicant CSV, writing a linked evidence dossier per person
-talent-engine score --program celo-trial --csv applications.csv \
+python3 -m talent_engine.cli score --program celo-trial --csv applications.csv \
                     --dossier-dir out/ --format csv
 
 # find candidates who never applied
-talent-engine scout --program celo-trial --seeds celo-org/celo-composer
+python3 -m talent_engine.cli scout --program celo-trial --seeds celo-org/celo-composer
 
 # how is the funded cohort doing?
-talent-engine monitor --program celo-trial
+python3 -m talent_engine.cli monitor --program celo-trial
 
 # did backing them change anything? (same rubric, before vs after)
-talent-engine measure --program celo-trial --baseline run_a --endline run_b
+python3 -m talent_engine.cli measure --program celo-trial --baseline run_a --endline run_b
 
 # reproduce any historical score exactly
-talent-engine verify --run run_a --handle octocat
+python3 -m talent_engine.cli verify --run run_a --handle octocat
 ```
 
 ### Form intake
@@ -59,12 +59,12 @@ applicant is ranked without anyone exporting a CSV.
 
 ```bash
 export TALLY_SIGNING_SECRET=...   # from the form's webhook settings; required
-talent-engine serve --program celo-trial --host 0.0.0.0 --port 8787
+python3 -m talent_engine.cli serve --program celo-trial --host 0.0.0.0 --port 8787
 #   POST /webhook/tally    signed submissions in
 #   GET  /healthz
 
-talent-engine submissions --program celo-trial                  # what came in
-talent-engine submissions --program celo-trial --with-contact   # + how to reach them
+python3 -m talent_engine.cli submissions --program celo-trial                  # what came in
+python3 -m talent_engine.cli submissions --program celo-trial --with-contact   # + how to reach them
 ```
 
 Three properties worth knowing, because each replaces a failure that is hard to

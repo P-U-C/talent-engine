@@ -205,7 +205,7 @@ that snapshot through those weights on that code produces the same number,
 every time:
 
 ```
-talent-engine verify --run <run_id> --handle <you>
+python3 -m talent_engine.cli verify --run <run_id> --handle <you>
 ```
 
 If it ever does not, that is a bug and the recorded score stands.

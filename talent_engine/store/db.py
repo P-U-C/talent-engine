@@ -114,6 +114,61 @@ CREATE TABLE IF NOT EXISTS decisions (
 );
 CREATE INDEX IF NOT EXISTS idx_decisions_feedback ON decisions(feedback_sent_at);
 
+-- Human sign-offs that acceptance depends on. Some programme gates are not
+-- machine-checkable -- whether an access barrier was verified, whether the
+-- build plan was reviewed, whether the Celo fit holds, whether a conflict was
+-- cleared. Before this table, `accept --select` would take an arbitrary handle
+-- with no scored application and none of these, and produce a full acceptance
+-- letter. A judgement nobody signed is not a judgement, so each one is
+-- recorded against a named steward and acceptance fails closed without them.
+CREATE TABLE IF NOT EXISTS gate_signoffs (
+    program TEXT NOT NULL,
+    handle TEXT NOT NULL,
+    gate TEXT NOT NULL,
+    steward TEXT NOT NULL,
+    note TEXT DEFAULT '',
+    signed_at TEXT NOT NULL,
+    PRIMARY KEY (program, handle, gate)
+);
+
+-- Overrides of a failed gate. Deliberately a separate table rather than a
+-- column: an override is an event with an author and a reason, and it must be
+-- as easy to audit as it was to perform.
+CREATE TABLE IF NOT EXISTS gate_overrides (
+    program TEXT NOT NULL,
+    handle TEXT NOT NULL,
+    gates TEXT NOT NULL,             -- comma-separated keys that were failing
+    steward TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    overridden_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_overrides_handle ON gate_overrides(program, handle);
+
+-- What happens after acceptance. The engine scored people, accepted them, and
+-- then had nothing to say about whether the money actually moved: receipts,
+-- reimbursements, the month-two Celo result, months funded, vendor offsets,
+-- Reserve returns and the final KPIs lived nowhere. For five people a shared
+-- manual tracker is enough, but it needs a defined shape and a named owner per
+-- entry, or "we track that" means whoever remembers.
+--
+-- Deliberately an append-only ledger of typed entries rather than a wide row
+-- per recipient: the obligations arrive at different times, from different
+-- people, and a correction should be visible as a correction.
+CREATE TABLE IF NOT EXISTS operating_ledger (
+    entry_id TEXT PRIMARY KEY,
+    program TEXT NOT NULL,
+    handle TEXT DEFAULT '',          -- blank for programme-level entries
+    entry_type TEXT NOT NULL,
+    period TEXT DEFAULT '',          -- 'YYYY-MM' or a milestone key
+    amount_usd REAL,                 -- NULL where the entry is not financial
+    owner TEXT NOT NULL,             -- who is accountable for this line
+    reference TEXT DEFAULT '',       -- receipt id, tx hash, post URL
+    note TEXT DEFAULT '',
+    recorded_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ledger_program ON operating_ledger(program, handle);
+CREATE INDEX IF NOT EXISTS idx_ledger_type ON operating_ledger(entry_type);
+
 -- Contact details live here and ONLY here: never in a snapshot, never in a
 -- score, never in a dossier. Joined to a submission by id when a human needs
 -- to reach someone, and separable from everything publishable by dropping
@@ -541,3 +596,196 @@ def _snapshot_from_dict(data: dict[str, Any]) -> ProfileSnapshot:
         collection_notes=data.get("collection_notes", []),
         partial=data.get("partial", False),
     )
+
+
+# --------------------------------------------------------------------------
+# Acceptance gates
+# --------------------------------------------------------------------------
+
+
+def _gate_methods():  # pragma: no cover - wiring only
+    """Attached below; kept out of the class body for readability."""
+
+
+def record_signoff(
+    self,
+    program: str,
+    handle: str,
+    gate: str,
+    steward: str,
+    note: str = "",
+) -> None:
+    """Record that a named person checked a gate. Idempotent per gate."""
+    self.conn.execute(
+        "INSERT INTO gate_signoffs (program, handle, gate, steward, note, signed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(program, handle, gate) DO UPDATE SET "
+        "steward = excluded.steward, note = excluded.note, signed_at = excluded.signed_at",
+        (program, handle, gate, steward, note, utc_now_iso()),
+    )
+    self.conn.commit()
+
+
+def signoffs(self, program: str, handle: str) -> dict[str, dict[str, Any]]:
+    rows = self.conn.execute(
+        "SELECT gate, steward, note, signed_at FROM gate_signoffs "
+        "WHERE program = ? AND handle = ?",
+        (program, handle),
+    ).fetchall()
+    return {r["gate"]: dict(r) for r in rows}
+
+
+def record_override(
+    self, program: str, handle: str, gates: list[str], steward: str, reason: str
+) -> None:
+    self.conn.execute(
+        "INSERT INTO gate_overrides (program, handle, gates, steward, reason, "
+        "overridden_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (program, handle, ",".join(sorted(gates)), steward, reason, utc_now_iso()),
+    )
+    self.conn.commit()
+
+
+def overrides(self, program: str, handle: str = "") -> list[dict[str, Any]]:
+    sql = "SELECT * FROM gate_overrides WHERE program = ?"
+    params: list[Any] = [program]
+    if handle:
+        sql += " AND handle = ?"
+        params.append(handle)
+    return [dict(r) for r in self.conn.execute(sql + " ORDER BY overridden_at", params)]
+
+
+def has_scored_application(self, program: str, handle: str) -> bool:
+    """Did this person actually apply and get scored under this programme?"""
+    row = self.conn.execute(
+        "SELECT 1 FROM submissions WHERE program = ? AND handle = ? "
+        "AND status = 'scored' LIMIT 1",
+        (program, handle),
+    ).fetchone()
+    return bool(row)
+
+
+def latest_application(self, program: str, handle: str) -> dict[str, Any] | None:
+    row = self.conn.execute(
+        "SELECT application_json, received_at FROM submissions WHERE program = ? "
+        "AND handle = ? ORDER BY received_at DESC LIMIT 1",
+        (program, handle),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+for _fn in (
+    record_signoff,
+    signoffs,
+    record_override,
+    overrides,
+    has_scored_application,
+    latest_application,
+):
+    setattr(Store, _fn.__name__, _fn)
+
+
+# --------------------------------------------------------------------------
+# Operating ledger
+# --------------------------------------------------------------------------
+
+# The obligations a programme takes on once it accepts someone. Named here so
+# that "what do we owe and what have we done" is answerable from the database
+# rather than from memory.
+LEDGER_TYPES = (
+    "receipt",           # a tooling invoice the recipient paid
+    "reimbursement",     # money we sent back to them
+    "vendor_offset",     # credit or discount a vendor gave us instead of cash
+    "reserve_return",    # give-back income actually received
+    "public_update",     # the public record we promised, with a URL
+    "celo_checkpoint",   # the month-two Celo result
+    "months_funded",     # how many months this person actually took
+    "kpi",               # a final outcome measure
+)
+
+
+def record_ledger_entry(
+    self,
+    program: str,
+    entry_type: str,
+    owner: str,
+    *,
+    handle: str = "",
+    period: str = "",
+    amount_usd: float | None = None,
+    reference: str = "",
+    note: str = "",
+) -> str:
+    """Append one operating entry. Returns its id.
+
+    `owner` is required and not defaulted: an obligation with no named person
+    behind it is the thing this table exists to prevent.
+    """
+    if entry_type not in LEDGER_TYPES:
+        raise ValueError(f"unknown entry type {entry_type!r}; expected one of {LEDGER_TYPES}")
+    if not owner:
+        raise ValueError("every ledger entry needs an owner")
+    entry_id = f"{program}:{entry_type}:{handle or '-'}:{period or '-'}:{utc_now_iso()}"
+    self.conn.execute(
+        "INSERT INTO operating_ledger (entry_id, program, handle, entry_type, period, "
+        "amount_usd, owner, reference, note, recorded_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            entry_id, program, handle, entry_type, period,
+            amount_usd, owner, reference, note, utc_now_iso(),
+        ),
+    )
+    self.conn.commit()
+    return entry_id
+
+
+def ledger(
+    self, program: str, handle: str = "", entry_type: str = ""
+) -> list[dict[str, Any]]:
+    sql = "SELECT * FROM operating_ledger WHERE program = ?"
+    params: list[Any] = [program]
+    if handle:
+        sql += " AND handle = ?"
+        params.append(handle)
+    if entry_type:
+        sql += " AND entry_type = ?"
+        params.append(entry_type)
+    return [dict(r) for r in self.conn.execute(sql + " ORDER BY recorded_at", params)]
+
+
+def ledger_summary(self, program: str) -> dict[str, Any]:
+    """Per-recipient totals and what is still missing.
+
+    The 'missing' list is the useful part: it is the difference between a
+    tracker and a filing cabinet.
+    """
+    rows = self.ledger(program)
+    # Union, not fallback. A recipient with zero entries is the single most
+    # important row in this report -- they are the one nobody has done
+    # anything for -- and keying off the ledger alone made them disappear.
+    people = sorted(
+        {r["handle"] for r in rows if r["handle"]}
+        | {m["handle"] for m in self.cohort(program)}
+    )
+    out: dict[str, Any] = {"program": program, "recipients": {}, "totals": {}}
+    for t in LEDGER_TYPES:
+        total = sum(r["amount_usd"] or 0 for r in rows if r["entry_type"] == t)
+        if total:
+            out["totals"][t] = round(total, 2)
+    expected = ("receipt", "reimbursement", "celo_checkpoint", "months_funded", "kpi")
+    for h in people:
+        mine = [r for r in rows if r["handle"] == h]
+        seen = {r["entry_type"] for r in mine}
+        out["recipients"][h] = {
+            "entries": len(mine),
+            "reimbursed_usd": round(
+                sum(r["amount_usd"] or 0 for r in mine if r["entry_type"] == "reimbursement"), 2
+            ),
+            "missing": [t for t in expected if t not in seen],
+            "owners": sorted({r["owner"] for r in mine}),
+        }
+    return out
+
+
+for _fn in (record_ledger_entry, ledger, ledger_summary):
+    setattr(Store, _fn.__name__, _fn)
