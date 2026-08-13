@@ -123,3 +123,61 @@ def test_render_names_every_gate_and_its_state(store):
     for gate in ALL_GATES:
         assert gate in text
     assert "FAIL" in text
+
+
+# ------------------------------------------------------- operating tracker
+
+def test_one_receipt_does_not_satisfy_a_four_month_term(store):
+    """Checking only that a type ever appeared let month one cover the term."""
+    from talent_engine.store.db import programme_periods
+
+    periods = programme_periods(4, "2026-09")
+    assert periods == ["2026-09", "2026-10", "2026-11", "2026-12"]
+    store.select_cohort(PROGRAM, ["amara"], baseline_run_id="")
+    store.record_ledger_entry(
+        PROGRAM, "receipt", "chad", handle="amara", period="2026-09", amount_usd=200.0
+    )
+    missing = store.ledger_summary(PROGRAM, periods=periods)["recipients"]["amara"][
+        "missing"
+    ]
+    assert "receipt:2026-10" in missing
+    assert "receipt:2026-09" not in missing
+
+
+def test_public_update_is_a_tracked_monthly_obligation(store):
+    """The policy commits to a monthly public update; it was not checked at all."""
+    from talent_engine.store.db import programme_periods
+
+    store.select_cohort(PROGRAM, ["amara"], baseline_run_id="")
+    missing = store.ledger_summary(
+        PROGRAM, periods=programme_periods(4, "2026-09")
+    )["recipients"]["amara"]["missing"]
+    assert [m for m in missing if m.startswith("public_update:")]
+
+
+def test_once_per_term_obligations_are_not_multiplied_by_month(store):
+    from talent_engine.store.db import programme_periods
+
+    store.select_cohort(PROGRAM, ["amara"], baseline_run_id="")
+    missing = store.ledger_summary(
+        PROGRAM, periods=programme_periods(4, "2026-09")
+    )["recipients"]["amara"]["missing"]
+    assert missing.count("celo_checkpoint") == 1
+    assert missing.count("kpi") == 1
+
+
+def test_a_closed_out_recipient_has_nothing_missing(store):
+    from talent_engine.store.db import programme_periods
+
+    periods = programme_periods(2, "2026-09")
+    store.select_cohort(PROGRAM, ["amara"], baseline_run_id="")
+    for period in periods:
+        for t in ("receipt", "reimbursement", "public_update"):
+            store.record_ledger_entry(
+                PROGRAM, t, "chad", handle="amara", period=period, amount_usd=1.0
+            )
+    for t in ("celo_checkpoint", "months_funded", "kpi"):
+        store.record_ledger_entry(PROGRAM, t, "chad", handle="amara")
+    assert store.ledger_summary(PROGRAM, periods=periods)["recipients"]["amara"][
+        "missing"
+    ] == []

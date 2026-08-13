@@ -753,35 +753,70 @@ def ledger(
     return [dict(r) for r in self.conn.execute(sql + " ORDER BY recorded_at", params)]
 
 
-def ledger_summary(self, program: str) -> dict[str, Any]:
+def programme_periods(duration_months: int, start: str) -> list[str]:
+    """The 'YYYY-MM' keys a term of this length covers, from its start month."""
+    if not start or duration_months <= 0:
+        return []
+    year, month = int(start[:4]), int(start[5:7])
+    out = []
+    for _ in range(duration_months):
+        out.append(f"{year:04d}-{month:02d}")
+        month += 1
+        if month > 12:
+            month, year = 1, year + 1
+    return out
+
+
+def ledger_summary(
+    self, program: str, *, periods: list[str] | None = None
+) -> dict[str, Any]:
     """Per-recipient totals and what is still missing.
 
     The 'missing' list is the useful part: it is the difference between a
-    tracker and a filing cabinet.
+    tracker and a filing cabinet. It is period-aware on purpose. Checking only
+    that a type had *ever* been recorded meant one receipt in month one
+    satisfied the tracker for the whole four-month term, and `public_update`
+    -- a monthly obligation the policy actually commits to -- was not checked
+    at all. Absence in month three is exactly what this is for.
     """
     rows = self.ledger(program)
-    # Union, not fallback. A recipient with zero entries is the single most
-    # important row in this report -- they are the one nobody has done
-    # anything for -- and keying off the ledger alone made them disappear.
     people = sorted(
         {r["handle"] for r in rows if r["handle"]}
         | {m["handle"] for m in self.cohort(program)}
     )
-    out: dict[str, Any] = {"program": program, "recipients": {}, "totals": {}}
+    periods = periods or []
+    out: dict[str, Any] = {
+        "program": program,
+        "periods": periods,
+        "recipients": {},
+        "totals": {},
+    }
     for t in LEDGER_TYPES:
         total = sum(r["amount_usd"] or 0 for r in rows if r["entry_type"] == t)
         if total:
             out["totals"][t] = round(total, 2)
-    expected = ("receipt", "reimbursement", "celo_checkpoint", "months_funded", "kpi")
+
+    # Once per term.
+    ONCE = ("celo_checkpoint", "months_funded", "kpi")
+    # Once per programme month.
+    MONTHLY = ("receipt", "reimbursement", "public_update")
+
     for h in people:
         mine = [r for r in rows if r["handle"] == h]
         seen = {r["entry_type"] for r in mine}
+        by_period = {(r["entry_type"], r["period"]) for r in mine}
+        missing = [t for t in ONCE if t not in seen]
+        for t in MONTHLY:
+            gaps = [p for p in periods if (t, p) not in by_period]
+            if not periods and t not in seen:
+                missing.append(t)
+            missing.extend(f"{t}:{p}" for p in gaps)
         out["recipients"][h] = {
             "entries": len(mine),
             "reimbursed_usd": round(
                 sum(r["amount_usd"] or 0 for r in mine if r["entry_type"] == "reimbursement"), 2
             ),
-            "missing": [t for t in expected if t not in seen],
+            "missing": missing,
             "owners": sorted({r["owner"] for r in mine}),
         }
     return out

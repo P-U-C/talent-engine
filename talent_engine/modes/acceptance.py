@@ -24,7 +24,11 @@ from typing import Any
 from ..programs.policy import ProgramOverlay
 
 SPLITS_APP = "https://app.splits.org"
-PLEDGE_APP = "https://pledge.prezenti.xyz"
+# The trial give-back flow, not the generic Celo pledge at the site root. The
+# root records the old 1% Celo Community commitment against a schema with no
+# field for this programme's cap, sunset, pro-rating or ROFO — so sending a
+# recipient there records the wrong terms, irrevocably.
+PLEDGE_APP = "https://pledge.prezenti.xyz/#/trial"
 
 # Human-readable renderings of the commitment keys, so the letter reads as
 # sentences rather than as a dump of the JSON.
@@ -163,7 +167,7 @@ def acceptance_letter(
         add(
             "  A score never decided this. It produced a shortlist; people read "
             "the evidence and decided. You can reproduce the number yourself: "
-            "https://github.com/P-U-C/talent-engine"
+            "https://github.com/prezenti/talent-engine"
         )
         add("")
 

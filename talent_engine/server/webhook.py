@@ -108,11 +108,20 @@ class IntakeService:
             self.rejected += 1
             return "no-submission-id"
 
-        # Stamp WHICH terms were accepted at the moment of acceptance. Without
-        # this, editing the policy silently rewrites what everyone who already
-        # applied is taken to have agreed to.
-        if self.overlay is not None and sub.application.accepted_terms:
-            sub.application.accepted_terms_version = self.overlay.terms_digest()
+        # WHICH terms were accepted has to come from the applicant, not from
+        # us. Stamping `overlay.terms_digest()` here recorded whatever the
+        # server considered current at the moment the webhook arrived — so a
+        # stale form, cached embed or queued retry was recorded as acceptance
+        # of words the applicant never saw, and the acceptance gate then
+        # certified it as current.
+        #
+        # The form carries the digest it was rendered with. If it is absent we
+        # leave the version empty rather than inventing one: the gate treats an
+        # unknown version as not-current and fails closed, which is the correct
+        # reading of "we do not know what they agreed to".
+        sub.application.accepted_terms_version = (
+            sub.application.accepted_terms_version or ""
+        ).strip()
 
         with self._lock:
             fresh = self._intake_store.record_submission(

@@ -23,10 +23,15 @@ from __future__ import annotations
 
 import base64
 import html
+import urllib.parse
 import os
 from functools import lru_cache
 from pathlib import Path
 
+# The engine's own repository. A deployment that publishes its own fork sets
+# `page.repo_url` in its program config — the applicant is told to clone this
+# and reproduce their score, so it has to be the repository they can actually
+# read the deployed rubric in.
 REPO_URL = "https://github.com/P-U-C/talent-engine"
 ASSETS = Path(__file__).resolve().parent / "assets"
 
@@ -219,8 +224,14 @@ footer .mark { width: 9rem; height: auto; color: var(--hero-ink); opacity: 0.85;
 """
 
 
-def _embed(form_id: str) -> str:
-    """The Tally iframe, or an honest placeholder when no form is configured."""
+def _embed(form_id: str, terms_version: str = "") -> str:
+    """The Tally iframe, or an honest placeholder when no form is configured.
+
+    `terms_version` prefills the form's hidden field, so the submission records
+    the digest of the terms this page actually rendered. Without it the server
+    stamped whatever it considered current when the webhook arrived, and a
+    cached embed or a queued retry was recorded as acceptance of newer words.
+    """
     if not form_id:
         return (
             '<div class="card"><p><strong>The application form is not connected '
@@ -228,10 +239,13 @@ def _embed(form_id: str) -> str:
             "and this section becomes the form.</p></div>"
         )
     fid = html.escape(form_id, quote=True)
+    version = ""
+    if terms_version:
+        version = "&terms_version=" + urllib.parse.quote(terms_version, safe="")
     return (
         f'<iframe class="form-frame" src="https://tally.so/embed/{fid}'
-        '?alignLeft=1&hideTitle=1&transparentBackground=1&dynamicHeight=1" '
-        'loading="lazy" title="Application form"></iframe>'
+        "?alignLeft=1&hideTitle=1&transparentBackground=1&dynamicHeight=1"
+        f'{version}" loading="lazy" title="Application form"></iframe>'
     )
 
 
@@ -284,7 +298,8 @@ def _status_block(overlay, form_id: str) -> str:
             f'<p class="note">Applications close '
             f"{html.escape(overlay.applications_close)}.</p>"
         )
-    return closing + _embed(form_id)
+    version = overlay.terms_digest() if overlay is not None else ""
+    return closing + _embed(form_id, version)
 
 
 def landing_page(
@@ -306,6 +321,13 @@ def landing_page(
     lede = html.escape(text["lede"])
     extra_footer = f"<p>{html.escape(text['footer'])}</p>" if text.get("footer") else ""
     program = html.escape(program_name)
+    # A deployment publishing its own fork must point applicants at that fork:
+    # cloning the upstream engine and running the deployed programme's key
+    # against it reproduces a different number.
+    repo_url = html.escape(text.get("repo_url") or REPO_URL, quote=True)
+    program_key = html.escape(
+        getattr(overlay, "scoring_program", "") or getattr(overlay, "key", "") or "PROGRAM"
+    )
 
     return f"""<!doctype html>
 <html lang="en">
@@ -355,9 +377,10 @@ measure access, and access is exactly what this is built to look past.</p>
 <h3>You can check our work</h3>
 <p>The rubric is published in full, along with the code that applies it. Clone
 it and reproduce your own score:</p>
-<pre><code>git clone {REPO_URL}
+<pre><code>git clone {repo_url}
 cd talent-engine
-talent-engine score --handles YOUR_GITHUB_HANDLE</code></pre>
+python3 -m talent_engine.cli score \\
+    --program {program_key} --handles YOUR_GITHUB_HANDLE</code></pre>
 <p style="margin-top:1.1rem">If a number looks wrong to you, you can show us
 exactly where — which is the point of publishing it. Every score comes with
 linked evidence for each component; a score with no evidence behind it cannot

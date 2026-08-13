@@ -105,7 +105,8 @@ def _overlay(**giveback_overrides):
         "cap_multiple_of_sponsorship": 10,
         "sunset_months_after_term": 36,
         "prorated_by_months_received": True,
-        "recipients": [{"name": "A", "bps": 100}, {"name": "B", "bps": 100}],
+        # One counterparty: a builder cannot owe a party they have no agreement with.
+        "recipients": [{"name": "A", "bps": 200}],
     }
     giveback.update(giveback_overrides)
     return ProgramOverlay.from_dict(
