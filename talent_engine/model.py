@@ -228,6 +228,12 @@ class RepoActivity:
     has_pages: bool = False
     has_description: bool = False
     homepage: str = ""
+    # Whether `homepage` was actually reachable at collection time. GitHub's
+    # homepage field is free text that nobody validates, so an unchecked value
+    # is a claim by the repository owner, not evidence that anything is
+    # deployed. Set during collection because scoring is a pure function and
+    # must never touch the network.
+    homepage_verified: bool = False
     license: str | None = None
     commits_in_window: int = 0
     commit_weeks: list[str] = field(default_factory=list)

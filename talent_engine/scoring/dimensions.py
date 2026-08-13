@@ -39,6 +39,10 @@ HALF_ORIGINAL_REPOS = 2.0  # 2 shipped originals = half the origination credit
 HALF_COMMIT_VOLUME = 40.0  # 40 commits to own originals = half the depth credit
 HALF_EXTERNAL_PRS = 4.0  # 4 merged PRs into others' repos = half
 HALF_REVIEWS = 5.0  # 5 reviews given = half
+# Commits at which a repository's finishing marks count for half. Deliberately
+# low: a small tool that is genuinely done should keep nearly all its
+# completeness credit, while a decorated repo with two commits should not.
+HALF_COMPLETENESS_COMMITS = 5.0
 HALF_ECOSYSTEM_HITS = 3.0
 HALF_FRONTIER_HITS = 2.0  # frontier work is rarer, so it saturates sooner
 
@@ -73,7 +77,11 @@ def _repo_completeness(repo: RepoActivity) -> tuple[float, list[str]]:
         marks.append("topics")
     if repo.has_releases:
         marks.append("releases")
-    if repo.homepage or repo.has_pages:
+    # GitHub Pages is verified by GitHub itself. A bare `homepage` string is
+    # not verified by anyone, so it only earns the mark once collection has
+    # confirmed something actually answers there -- otherwise "deployed" is a
+    # free mark for typing a URL into a settings box.
+    if repo.has_pages or (repo.homepage and repo.homepage_verified):
         marks.append("deployed")
     if repo.license:
         marks.append("license")
@@ -138,6 +146,16 @@ def shipping_agency(
         fracs = []
         for r in ranked:
             frac, marks = _repo_completeness(r)
+            # Finishing marks only mean "finished" if there is something there
+            # to finish. All five are metadata, and metadata is the one part of
+            # shipping that can be added without doing the work -- five thin
+            # repositories with a description, a licence and a tag scored
+            # higher on completeness than four real projects with 200 commits
+            # between them. Scaling by the repo's own activity makes the marks
+            # evidence of a finished project rather than of a decorated empty
+            # one. It saturates fast so that a genuinely small, genuinely
+            # finished tool is barely touched.
+            frac *= saturate(r.commits_in_window, HALF_COMPLETENESS_COMMITS)
             fracs.append(frac)
             if marks:
                 evidence.append(
@@ -281,6 +299,7 @@ def external_validation(
     max_pts = cfg.max_points("external_validation")
     external = [pr for pr in snap.merged_prs if not pr.is_own_repo]
     distinct_repos = {pr.repo.lower() for pr in external}
+    distinct_owners = {r.split("/")[0] for r in distinct_repos if "/" in r}
 
     # Breadth over volume. Clearing the bar in five different projects is a
     # far stronger signal than clearing it five times in one, and the latter is
@@ -289,6 +308,18 @@ def external_validation(
     effective = len(distinct_repos) + REPEAT_REPO_WEIGHT * (
         len(external) - len(distinct_repos)
     )
+
+    # Distinct *owners*, not just distinct repos. `is_own_repo` only means "not
+    # this account", so five repos belonging to one other account read as five
+    # independent maintainers clearing a review bar -- which is exactly the
+    # shape of a two-account ring, and two-account clusters are below
+    # `rings.MIN_FLAGGABLE_CLUSTER` and so never flagged. Counting owners costs
+    # a genuine contributor almost nothing (five PRs into five projects is
+    # normally five owners) while removing the cheap version of the attack.
+    if distinct_owners:
+        effective = min(effective, len(distinct_owners) + REPEAT_REPO_WEIGHT * (
+            len(distinct_repos) - len(distinct_owners)
+        ))
     frac = saturate(effective, HALF_EXTERNAL_PRS)
     evidence = [
         Evidence(claim=f"merged PR: {pr.repo}#{pr.number} {pr.title}"[:200], url=pr.url)
@@ -301,6 +332,7 @@ def external_validation(
         components={
             "merged_external_prs": float(len(external)),
             "distinct_repos": float(len(distinct_repos)),
+            "distinct_owners": float(len(distinct_owners)),
             "effective": round(effective, 2),
         },
         evidence=evidence,
@@ -345,35 +377,79 @@ def collaboration(
 # --------------------------------------------------------------------------
 
 
-def _taxonomy_hits(snap: ProfileSnapshot, taxonomy) -> list[tuple[str, str, list[str]]]:
-    """(label, url, reasons) for every *distinct repository* matching a taxonomy.
+# A taxonomy hit on a repository the candidate owns, matched only on strings
+# the candidate wrote -- topic, keyword, description, language -- is an
+# assertion, not evidence. Repo topics and descriptions are one API call to
+# set, and this program publishes its own taxonomy, so the exact strings that
+# score are known to anyone who reads the repository. Corroborated hits are
+# different in kind: `org:` means the repository lives in an ecosystem
+# organisation, and a merged PR means someone else's review bar was cleared.
+# Self-asserted hits still count -- naming your project accurately is not
+# cheating -- but they cannot carry a dimension on their own.
+SELF_ASSERTED_HIT_WEIGHT = 0.4
+CORROBORATING_PREFIXES = ("org:", "repo:")
+
+
+def _hit_weight(reasons: list[str], *, self_controlled: bool) -> float:
+    """1.0 for a corroborated hit, less for one the candidate asserted itself.
+
+    `self_controlled` is decided by *provenance*, not by comparing owner
+    strings to the handle. Everything in `snap.repos` was collected from the
+    candidate's own account listing, so they control its metadata whether it
+    sits under their username or under an organisation they created. An
+    earlier version of this compared `repo.owner == snap.handle`, which a
+    candidate defeated for free by moving repositories into an org: the owner
+    string stopped matching and every self-written topic scored in full again.
+
+    `org:` and `repo:` survive at full weight because they name third parties
+    the program chose in advance. A repository the candidate controls cannot
+    match those without actually being inside that organisation.
+    """
+    if not self_controlled:
+        return 1.0
+    if any(r.startswith(CORROBORATING_PREFIXES) for r in reasons):
+        return 1.0
+    return SELF_ASSERTED_HIT_WEIGHT
+
+
+def _taxonomy_hits(
+    snap: ProfileSnapshot, taxonomy
+) -> list[tuple[str, str, list[str], float]]:
+    """(label, url, reasons, weight) for every *distinct repository* matching.
 
     Deduped by repository on purpose.  Counting per-PR let fourteen small fixes
     to one monorepo read as fourteen units of ecosystem presence, which handed
     a well-connected low-shipper a higher footprint score than someone who had
     actually shipped two complete projects.  Footprint means "how much of this
     ecosystem have you touched", so the unit is the repo, not the event.
-    """
-    seen: dict[str, tuple[str, str, list[str]]] = {}
 
-    def record(repo_key: str, label: str, url: str, reasons: list[str]) -> None:
+    Each hit carries a weight so that self-declared metadata on your own
+    repositories cannot buy a full dimension.  See `_hit_weight`.
+    """
+    seen: dict[str, tuple[str, str, list[str], float]] = {}
+
+    def record(
+        repo_key: str, label: str, url: str, reasons: list[str], weight: float
+    ) -> None:
         if not reasons or repo_key in seen:
             return
-        seen[repo_key] = (label, url, reasons)
+        seen[repo_key] = (label, url, reasons, weight)
 
     for r in snap.repos:
         if r.is_fork and r.commits_in_window == 0:
             continue
+        reasons = taxonomy.match_reasons(
+            full_name=r.name,
+            description=r.description,
+            topics=r.topics,
+            language=r.language,
+        )
         record(
             r.name.lower(),
             r.name,
             r.url,
-            taxonomy.match_reasons(
-                full_name=r.name,
-                description=r.description,
-                topics=r.topics,
-                language=r.language,
-            ),
+            reasons,
+            _hit_weight(reasons, self_controlled=True),
         )
     for pr in snap.merged_prs:
         record(
@@ -381,6 +457,7 @@ def _taxonomy_hits(snap: ProfileSnapshot, taxonomy) -> list[tuple[str, str, list
             pr.repo,
             f"https://github.com/{pr.repo}",
             taxonomy.match_reasons(full_name=pr.repo, description=pr.title),
+            1.0,
         )
     return list(seen.values())
 
@@ -391,16 +468,21 @@ def ecosystem_footprint(
     """Activity inside the program's target ecosystem."""
     max_pts = cfg.max_points("ecosystem_footprint")
     hits = _taxonomy_hits(snap, cfg.ecosystem)
-    frac = saturate(len(hits), HALF_ECOSYSTEM_HITS)
+    effective = sum(w for _l, _u, _r, w in hits)
+    frac = saturate(effective, HALF_ECOSYSTEM_HITS)
     evidence = [
-        Evidence(claim=f"{label} matches ecosystem ({', '.join(reasons)})", url=url)
-        for label, url, reasons in hits[:8]
+        Evidence(
+            claim=f"{label} matches ecosystem ({', '.join(reasons)})"
+            + ("" if w >= 1.0 else " [self-declared metadata]"),
+            url=url,
+        )
+        for label, url, reasons, w in hits[:8]
     ]
     return DimensionScore(
         key="ecosystem_footprint",
         points=max_pts * frac if evidence else 0.0,
         max_points=max_pts,
-        components={"matches": float(len(hits))},
+        components={"matches": float(len(hits)), "effective": round(effective, 2)},
         evidence=evidence,
     )
 
@@ -416,16 +498,21 @@ def frontier_signal(
     """
     max_pts = cfg.max_points("frontier_signal")
     hits = _taxonomy_hits(snap, cfg.frontier)
-    frac = saturate(len(hits), HALF_FRONTIER_HITS)
+    effective = sum(w for _l, _u, _r, w in hits)
+    frac = saturate(effective, HALF_FRONTIER_HITS)
     evidence = [
-        Evidence(claim=f"{label} matches frontier ({', '.join(reasons)})", url=url)
-        for label, url, reasons in hits[:8]
+        Evidence(
+            claim=f"{label} matches frontier ({', '.join(reasons)})"
+            + ("" if w >= 1.0 else " [self-declared metadata]"),
+            url=url,
+        )
+        for label, url, reasons, w in hits[:8]
     ]
     return DimensionScore(
         key="frontier_signal",
         points=max_pts * frac if evidence else 0.0,
         max_points=max_pts,
-        components={"matches": float(len(hits))},
+        components={"matches": float(len(hits)), "effective": round(effective, 2)},
         evidence=evidence,
     )
 

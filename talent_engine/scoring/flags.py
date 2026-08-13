@@ -124,8 +124,15 @@ def evaluate_flags(snap: ProfileSnapshot, cfg: ProgramConfig) -> list[Flag]:
             )
 
     # --- referrer verification -------------------------------------------
+    # Only meaningful if the program actually publishes a registry. With an
+    # empty registry every declared referrer is "unverifiable" by construction,
+    # so the flag stops being a signal about the applicant and becomes a
+    # penalty for the program's own omission -- landing hardest on the honest
+    # candidate who followed the rubric and named someone. A candidate who
+    # declares nothing stays clean, which inverts the incentive the flag exists
+    # to create. If we have published no registry, we have no basis to doubt.
     declared = snap.application.referrer_name.strip()
-    if declared and not cfg.is_verified_referrer(declared):
+    if declared and cfg.referrers and not cfg.is_verified_referrer(declared):
         flags.append(
             Flag(
                 key="unverifiable_referrer",

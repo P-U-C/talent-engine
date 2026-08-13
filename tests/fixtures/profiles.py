@@ -50,6 +50,7 @@ def genuine_builder() -> ProfileSnapshot:
             has_releases=True,
             has_description=True,
             homepage="https://mpesa-celo.example",
+            homepage_verified=True,
             license="MIT",
             commits_in_window=94,
         ),
@@ -65,6 +66,7 @@ def genuine_builder() -> ProfileSnapshot:
             has_releases=True,
             has_description=True,
             homepage="https://savings-circle.example",
+            homepage_verified=True,
             license="Apache-2.0",
             commits_in_window=61,
         ),
@@ -229,6 +231,7 @@ def quiet_finisher() -> ProfileSnapshot:
             has_releases=True,
             has_description=True,
             homepage="https://receipts.example",
+            homepage_verified=True,
             license="MIT",
             commits_in_window=31,
         ),
@@ -548,3 +551,61 @@ def genuine_pool() -> dict[str, ProfileSnapshot]:
             created=_iso(2019 + i * 2, 3, 11),
         )
     return pool
+
+
+def metadata_maximiser() -> ProfileSnapshot:
+    """Taxonomy-optimal metadata on thin repos, with no accomplices at all.
+
+    The cheapest attack that is not obviously an attack.  Every field set here
+    is one the applicant controls directly and can set through the API in
+    minutes, and the exact strings that score are public: this program ships
+    its taxonomy in `programs/*.json` and the rubric tells you to read it.
+
+    No sockpuppets, no fake external validation, nothing a human would call
+    fraud.  Five throwaway repositories, taxonomy keywords in every name,
+    description and topic list, all five finishing marks set, a `homepage`
+    string that nobody fetches, and a weekly cron spreading commits across
+    fourteen distinct weeks in all three thirds of the window so neither
+    `burst_activity` nor `metric_inflation` fires.  The repositories sit under
+    an organisation rather than the user handle, which used to be enough on its
+    own to restore full taxonomy credit.
+
+    Against the live `prezenti-sponsorship-trial` weights this originally
+    scored 67.52 clean, beating `patient_farmer` by nearly seven points, and
+    74.97 once three typo-fix pull requests were added -- above the genuine
+    builder, with no flag raised.
+    """
+    weeks = [f"2026-W{w:02d}" for w in (7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 32)]
+    topics = ["celo", "minipay", "mcp", "x402"]
+    repos = [
+        RepoActivity(
+            name=f"agentworks/agent-kit-{i}",
+            owner="agentworks",  # an org the candidate controls, not the handle
+            is_fork=False,
+            pushed_at=_iso(2026, 8, 3),
+            created_at=_iso(2026, 2, 10),
+            description="MCP server for Celo MiniPay agent payments over x402",
+            language="typescript",
+            topics=topics,
+            has_releases=True,
+            has_description=True,
+            homepage="https://example.invalid",
+            homepage_verified=False,  # nothing answers there
+            license="MIT",
+            commits_in_window=c,
+            commit_weeks=weeks[i::5],
+        )
+        for i, c in enumerate([14, 12, 10, 9, 7])
+    ]
+    return ProfileSnapshot(
+        handle="maximiser",
+        account_created_at=_iso(2019, 4, 2),
+        collected_at=WINDOW_END,
+        window_start=WINDOW_START,
+        window_end=WINDOW_END,
+        repos=repos,
+        merged_prs=[],
+        reviews=[],
+        active_weeks=weeks,
+        application=Application(),  # declares nothing, so nothing to flag
+    )

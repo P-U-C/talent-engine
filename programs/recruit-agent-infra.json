@@ -1,18 +1,18 @@
 {
   "key": "recruit-agent-infra",
-  "name": "Recruitment — agent infrastructure / protocol engineering",
+  "name": "Recruitment \u2014 agent infrastructure / protocol engineering",
   "window_months": 12,
   "mode": "recruitment",
   "context_statement_enabled": false,
   "weights": {
-    "shipping_agency": 30,
+    "shipping_agency": 40,
     "consistency": 15,
     "external_validation": 15,
     "collaboration": 12,
     "ecosystem_footprint": 10,
     "frontier_signal": 8,
     "context_statement": 0,
-    "trusted_referral": 10
+    "trusted_referral": 0
   },
   "ecosystem": {
     "topics": [
@@ -36,11 +36,26 @@
       "sdk",
       "toolchain"
     ],
-    "languages": ["rust", "go", "zig", "c++"]
+    "languages": [
+      "rust",
+      "go",
+      "zig",
+      "c++"
+    ]
   },
   "frontier": {
-    "orgs": ["modelcontextprotocol", "elizaos", "valory-xyz"],
-    "topics": ["mcp", "model-context-protocol", "ai-agents", "agentic", "a2a"],
+    "orgs": [
+      "modelcontextprotocol",
+      "elizaos",
+      "valory-xyz"
+    ],
+    "topics": [
+      "mcp",
+      "model-context-protocol",
+      "ai-agents",
+      "agentic",
+      "a2a"
+    ],
     "keywords": [
       "mcp",
       "model context protocol",

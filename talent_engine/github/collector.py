@@ -13,8 +13,16 @@ candidate's fault.
 
 from __future__ import annotations
 
+import ipaddress
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+# Seconds to wait for a declared homepage to answer. Short on purpose: this is
+# a liveness check inside a collection loop, not a crawl.
+HOMEPAGE_TIMEOUT = 5
 
 from ..model import (
     Application,
@@ -150,6 +158,7 @@ class Collector:
         for repo in sample:
             self._collect_commits(snap, repo, since)
             repo.has_releases = self._has_releases(repo.name)
+            repo.homepage_verified = self._homepage_answers(repo.homepage)
 
     def _collect_commits(
         self, snap: ProfileSnapshot, repo: RepoActivity, since: datetime
@@ -175,6 +184,53 @@ class Collector:
     def _has_releases(self, full_name: str) -> bool:
         releases = self.client.get(f"/repos/{full_name}/releases", {"per_page": 1})
         return bool(releases)
+
+    def _homepage_answers(self, homepage: str) -> bool:
+        """Does anything actually answer at the declared homepage?
+
+        GitHub's homepage field is unvalidated free text, so scoring it as a
+        "deployed" mark rewards typing a URL into a settings box. This is a
+        cheap liveness check, not an audit: any 2xx/3xx means something is
+        served there. It deliberately fails closed -- a timeout, a DNS failure
+        or any exception leaves the mark unearned rather than granting it, so
+        an unreachable URL can never be worth more than an absent one.
+
+        Not routed through the GitHub client: different host, different rate
+        limits, and it must never consume the API budget.
+        """
+        url = (homepage or "").strip()
+        if not url:
+            return False
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            return False
+        # Refuse to fetch anything that is not a public name. The homepage
+        # string is attacker-controlled, so a naive fetch turns the collector
+        # into an SSRF probe against its own network.
+        host = parsed.hostname.lower()
+        if host in ("localhost", "metadata.google.internal") or host.endswith(
+            (".localhost", ".internal", ".local")
+        ):
+            return False
+        try:
+            if ipaddress.ip_address(host).is_global is False:
+                return False
+        except ValueError:
+            pass  # a hostname, not a literal address
+        req = urllib.request.Request(
+            url, method="HEAD", headers={"User-Agent": "talent-engine/homepage-check"}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=HOMEPAGE_TIMEOUT) as resp:
+                return 200 <= resp.status < 400
+        except urllib.error.HTTPError as exc:
+            # A 4xx/5xx means the host answered but the page is not there.
+            # 405 is the exception: some servers reject HEAD but serve GET.
+            return exc.code == 405
+        except Exception:
+            return False
 
     def _collect_merged_prs(self, snap: ProfileSnapshot, since: datetime) -> None:
         query = (

@@ -4,3 +4,12 @@ __pycache__/
 .venv/
 *.db
 out/
+
+# Collector HTTP cache. Contains raw GitHub API responses about real people —
+# profiles, repositories and pull requests of anyone this engine has scored or
+# scouted. It is a working artifact, never a deliverable, and this repository
+# is public. `*.db` did not cover it, which is how 1.6MB of cached API bodies
+# came to be committed.
+.cache/
+*.sqlite
+*.sqlite3
