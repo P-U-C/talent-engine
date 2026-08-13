@@ -95,6 +95,13 @@ class ProgramOverlay:
     # by `accept` unless the attestation matches these values and the current
     # terms release.
     attestation: dict[str, Any] = field(default_factory=dict)
+    # This trial chooses a mandatory public pledge rather than a private path:
+    # acceptance publishes the builder's GitHub handle in an EAS attestation.
+    public_attestation_required: bool = False
+    # Payment route for the calculated give-back. Direct-to-Safe is deliberate:
+    # a collector receiving the full levy would have to route 100% of its
+    # balance and becomes a second policy surface.
+    payment: dict[str, Any] = field(default_factory=dict)
     # Who is accountable for the operating obligations after acceptance --
     # receipts, reimbursements, the month-two Celo result, KPIs. Every ledger
     # entry requires an owner; this is the default so the common case is not a
@@ -222,6 +229,23 @@ class ProgramOverlay:
             for required in ("schema_uid", "eas_contract", "recipient", "community_fund_recipient"):
                 if not att.get(required):
                     raise ValueError(f"{self.key}: attestation.{required} is required")
+            if not self.public_attestation_required:
+                raise ValueError(
+                    f"{self.key}: public_attestation_required must be true when "
+                    "acceptance requires an on-chain public pledge"
+                )
+
+        payment = self.payment or {}
+        if total_bps > 0:
+            if payment.get("method") != "direct_to_prezenti_safe":
+                raise ValueError(
+                    f"{self.key}: payment.method must be direct_to_prezenti_safe; "
+                    "do not deploy a collector for this trial"
+                )
+            if att and str(payment.get("recipient", "")).lower() != str(att.get("recipient", "")).lower():
+                raise ValueError(
+                    f"{self.key}: payment.recipient must match the verified Prezenti Safe"
+                )
 
         if not self.commitments_to_recipient:
             raise ValueError(
@@ -278,6 +302,8 @@ class ProgramOverlay:
                 },
                 "document_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                 "giveback": self.giveback,
+                "payment": self.payment,
+                "public_attestation_required": self.public_attestation_required,
                 "upside": self.upside,
                 "commitments_to_recipient": self.commitments_to_recipient,
                 "term_start": self.term_start,
@@ -330,6 +356,10 @@ class ProgramOverlay:
             ),
             "enforcement: " + str(g.get("enforcement", "unspecified")),
         ]
+        if self.payment.get("method") == "direct_to_prezenti_safe":
+            lines.append("payment route: direct to the verified Prezenti Safe; no 0xSplits collector")
+        if self.public_attestation_required:
+            lines.append("acceptance requires a public Celo EAS pledge naming your GitHub handle")
         # Say who is owed. "2%" without a counterparty is the ambiguity that let
         # the policy and the written terms disagree for as long as they did.
         if g.get("obligation_runs_to"):

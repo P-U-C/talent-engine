@@ -97,7 +97,7 @@ shipping.
 ```bash
 git clone https://github.com/prezenti/talent-engine
 cd talent-engine
-python3 -m pytest tests/ -q                       # 275 tests, no network needed
+python3 -m pytest tests/ -q                       # full local suite, no network needed
 export GITHUB_TOKEN=...
 python3 -m talent_engine.cli score \
     --program prezenti-sponsorship-trial --handles YOUR_HANDLE
@@ -153,7 +153,7 @@ outreach traffic  ─────┘         ↓
                                  ↓                            ↓
                           emailed to the programme operator, with evidence
                                  ↓
-                          humans decide  ──→  accept: terms, split, pledge
+                          humans decide  ──→  accept: terms, Safe payment route, public pledge
                                           └─→  decline: feedback, tracked
 ```
 
@@ -217,7 +217,7 @@ configuration lives here.
 | [RUBRIC.md](RUBRIC.md) | the complete scoring model |
 | [docs/STRATEGY.md](docs/STRATEGY.md) | why these signals, and what an adversary can do to them |
 | [docs/SPONSORSHIP_TERMS.md](docs/SPONSORSHIP_TERMS.md) | current terms index |
-| [docs/terms/prezenti-sponsorship-trial-2026-08-13.md](docs/terms/prezenti-sponsorship-trial-2026-08-13.md) | canonical terms release agreed by applicants |
+| [docs/terms/prezenti-sponsorship-trial-2026-08-13-v2.md](docs/terms/prezenti-sponsorship-trial-2026-08-13-v2.md) | canonical terms release agreed by applicants |
 | [docs/PREZENTI_SPONSORSHIP_TRIAL.md](docs/PREZENTI_SPONSORSHIP_TRIAL.md) | the trial in full |
 | [docs/PROGRAM_LAYER.md](docs/PROGRAM_LAYER.md) | how programmes sit above the score |
 | [docs/ENGINE.md](docs/ENGINE.md) | the engine's own README |

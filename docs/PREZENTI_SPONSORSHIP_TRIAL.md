@@ -87,18 +87,22 @@ Each recipient makes a public 2% good-faith give-back pledge covering the
 applicant-controlled product identified in the sponsored build plan.
 
 Where that product generates on-chain revenue through Celo, 2% of revenue
-actually received is owed **to Prezenti and to nobody else**, routed through a
-public Splits contract. Prezenti separately and publicly commits to routing
+actually received is owed **to Prezenti and to nobody else**, paid directly to
+the verified Prezenti Safe. Prezenti separately and publicly commits to routing
 half of what it receives onward to the Celo Community Fund, equivalent to 1% of
 covered income; that is Prezenti's commitment, not an obligation of the
-recipient, who has no agreement with the Fund. The recipient address must be verified in the deployment configuration
-before a Split is created. If the project later launches a token or creates
-value through another structure, the recipient will publicly document how they
-intend to honour the same 2% commitment. The pledge is not equity, a token
-warrant or an investment agreement.
+recipient, who has no agreement with the Fund.
 
-An empty Split is not an outcome. Deployment of the give-back mechanism is
-reported only when a sponsored product has revenue to route.
+No 0xSplits collector is deployed for this trial. A collector receiving the full
+2% levy would need to route 100% of its balance to Prezenti, adding a second
+policy surface without changing the builder's obligation. If the project later
+launches a token or creates value through another structure, the recipient will
+publicly document how they intend to honour the same 2% commitment. The pledge
+is not equity, a token warrant or an investment agreement.
+
+Acceptance requires a public Celo EAS attestation signed by the builder's wallet
+and naming the builder's GitHub handle. Builders who do not want that public
+pledge should not apply or should withdraw before acceptance.
 
 ## Outcomes
 

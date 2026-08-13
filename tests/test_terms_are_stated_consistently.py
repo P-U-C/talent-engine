@@ -27,7 +27,7 @@ OVERLAY = load_overlay("prezenti-sponsorship-trial")
 # Every published surface that states the give-back in prose.
 PROSE = [
     ROOT / "docs" / "SPONSORSHIP_TERMS.md",
-    ROOT / "docs" / "terms" / "prezenti-sponsorship-trial-2026-08-13.md",
+    ROOT / "docs" / "terms" / "prezenti-sponsorship-trial-2026-08-13-v2.md",
     ROOT / "docs" / "PREZENTI_SPONSORSHIP_TRIAL.md",
     ROOT / "RUBRIC.md",
     ROOT / "README.md",
@@ -65,6 +65,14 @@ def test_no_document_still_describes_a_split_obligation(path):
                     f"{path.name}:{i + 1} still states the give-back as a split "
                     f"obligation, and not as history:\n  {line.strip()}"
                 )
+
+
+@pytest.mark.parametrize("path", PROSE, ids=lambda p: p.name)
+def test_current_surfaces_do_not_send_builders_to_a_splits_collector(path):
+    text = "\n".join(_lines(path))
+    assert "app.splits.org" not in text
+    assert "public Splits contract" not in text
+    assert "split is created" not in text
 
 
 def test_the_policy_names_exactly_one_counterparty():
@@ -105,6 +113,8 @@ def test_the_terms_summary_names_who_is_owed():
     assert "nobody else" in joined
     assert "half of what it receives" in joined
     assert "1% of covered income" in joined
+    assert "direct to the verified prezenti safe" in joined
+    assert "public celo eas pledge" in joined
 
 
 def test_the_form_marker_is_derived_from_the_terms_release():
@@ -114,6 +124,8 @@ def test_the_form_marker_is_derived_from_the_terms_release():
     option = terms[0]["options"][0]
     assert "[terms-version: {terms_digest}]" in option
     assert "2% of Celo revenue and grant income" in option
+    assert "paid directly to the verified Prezenti Safe" in option
+    assert "public Celo EAS pledge" in option
 
 
 def test_the_generated_landing_page_links_the_canonical_terms_release():
@@ -124,6 +136,8 @@ def test_the_generated_landing_page_links_the_canonical_terms_release():
     assert f"terms-version: {OVERLAY.terms_digest()}" in page
     assert "half of what it receives" in page
     assert "1% of covered income" in page
+    assert "direct to the verified Prezenti Safe" in page
+    assert "public Celo EAS pledge" in page
 
 
 def test_the_acceptance_letter_links_the_same_terms_release():
@@ -133,6 +147,8 @@ def test_the_acceptance_letter_links_the_same_terms_release():
     assert OVERLAY.terms_uri in letter
     assert OVERLAY.terms_digest() in letter
     assert "owed to Prezenti and to nobody else" in letter
+    assert "No 0xSplits collector" in letter
+    assert "GitHub handle" in letter
 
 
 def test_months_funded_is_not_selected_at_acceptance_anywhere_here():

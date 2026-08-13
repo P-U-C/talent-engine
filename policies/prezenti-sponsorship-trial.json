@@ -91,9 +91,9 @@
   "term_start": "2026-09",
   "term_end": "2026-12-29",
   "terms_release": {
-    "version": "prezenti-sponsorship-trial-2026-08-13",
-    "document": "docs/terms/prezenti-sponsorship-trial-2026-08-13.md",
-    "uri": "https://github.com/prezenti/talent-engine/blob/main/docs/terms/prezenti-sponsorship-trial-2026-08-13.md"
+    "version": "prezenti-sponsorship-trial-2026-08-13-v2",
+    "document": "docs/terms/prezenti-sponsorship-trial-2026-08-13-v2.md",
+    "uri": "https://github.com/prezenti/talent-engine/blob/main/docs/terms/prezenti-sponsorship-trial-2026-08-13-v2.md"
   },
   "attestation": {
     "chain_id": 42220,
@@ -101,6 +101,11 @@
     "schema_uid": "0x6a5f8c4f58911419d3ae8a67df4f342eea92c0d2167b5b814eaa6d450e9135f4",
     "recipient": "0xA5c9389A0Ce1bFe24FF883E761Ff313225C77D44",
     "community_fund_recipient": "0xD533Ca259b330c7A88f74E000a3FaEa2d63B7972"
+  },
+  "public_attestation_required": true,
+  "payment": {
+    "method": "direct_to_prezenti_safe",
+    "recipient": "0xA5c9389A0Ce1bFe24FF883E761Ff313225C77D44"
   },
   "operating_owner": "zozDOTeth"
 }
