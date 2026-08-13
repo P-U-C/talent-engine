@@ -45,6 +45,12 @@ class ProgramOverlay:
     # reads this, so the page cannot look open while the programme is not.
     status: str = "open"
     applications_close: str = ""
+    # Who is accountable for the operating obligations after acceptance --
+    # receipts, reimbursements, the month-two Celo result, KPIs. Every ledger
+    # entry requires an owner; this is the default so the common case is not a
+    # flag on every command, and so "who owns this programme's follow-through"
+    # has a written answer rather than an assumed one.
+    operating_owner: str = ""
     upside: dict[str, Any] = field(default_factory=dict)
     # What the program owes the recipient. A sponsorship where only one
     # side carries obligations is not a relationship, and at this cheque

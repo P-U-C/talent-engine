@@ -278,20 +278,32 @@ def cmd_feedback_queue(args) -> int:
 
 def cmd_track(args) -> int:
     """Append an operating entry: receipts, reimbursements, checkpoints, KPIs."""
+    from .programs.policy import load_overlay
+
     cfg = load_program(args.program)
+    overlay = load_overlay(args.program)
     store = Store(args.db)
     handle = normalize_handle(args.handle) if args.handle else ""
+    owner = args.owner or overlay.operating_owner
+    if not owner:
+        print(
+            "no owner given and the policy sets no operating_owner. Every entry "
+            "needs someone accountable for it.",
+            file=sys.stderr,
+        )
+        store.close()
+        return 2
     entry_id = store.record_ledger_entry(
         cfg.key,
         args.type,
-        args.owner,
+        owner,
         handle=handle or "",
         period=args.period or "",
         amount_usd=args.amount,
         reference=args.reference or "",
         note=args.note or "",
     )
-    print(f"recorded {args.type} for {handle or cfg.key} (owner: {args.owner})")
+    print(f"recorded {args.type} for {handle or cfg.key} (owner: {owner})")
     print(f"  {entry_id}")
     store.close()
     return 0
@@ -702,7 +714,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("track", help="record an operating entry (receipt, KPI, ...)")
     s.add_argument("--program", required=True)
     s.add_argument("--type", required=True, choices=list(LEDGER_TYPES))
-    s.add_argument("--owner", required=True, help="who is accountable for this line")
+    s.add_argument("--owner", help="who is accountable (defaults to the policy operating_owner)")
     s.add_argument("--handle", help="recipient, if this is not programme-level")
     s.add_argument("--period", help="'YYYY-MM' or a milestone key")
     s.add_argument("--amount", type=float, help="USD, where the entry is financial")

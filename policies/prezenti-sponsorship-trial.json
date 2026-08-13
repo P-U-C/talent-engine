@@ -85,5 +85,6 @@
     "feedback_to_unsuccessful_applicants": true
   },
   "status": "open",
-  "applications_close": "2026-08-25"
+  "applications_close": "2026-08-25",
+  "operating_owner": "zozDOTeth"
 }
