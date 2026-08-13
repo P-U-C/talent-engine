@@ -42,7 +42,15 @@ def _uuid() -> str:
     return str(uuid.uuid4())
 
 
-def build_blocks(spec: dict) -> list[dict]:
+def build_blocks(spec: dict, terms_digest: str = "") -> list[dict]:
+    """Blocks for the whole form.
+
+    `terms_digest` is substituted into any `{terms_digest}` placeholder. The
+    acceptance option carries it because Tally exposes no API for hidden
+    fields, and a ticked checkbox is submitted as its own option text — so the
+    applicant transmits the version of the terms they actually saw, rather than
+    the server stamping whatever it considers current when the webhook lands.
+    """
     blocks: list[dict] = []
 
     title_uuid = _uuid()
@@ -57,30 +65,6 @@ def build_blocks(spec: dict) -> list[dict]:
     )
 
     for q in spec["questions"]:
-        # Hidden fields are not question blocks in Tally: they are declared on
-        # the form and populated from the query string, and they come back in
-        # the webhook alongside the answers. `terms_version` is one, so that
-        # the submission records the digest of the terms the page actually
-        # rendered rather than whatever the server considers current when the
-        # webhook lands.
-        #
-        # UNVERIFIED against the live API — written without a TALLY_API_KEY to
-        # test with. If Tally rejects this block, add the hidden field named
-        # `terms_version` in the form's settings by hand; the engine only cares
-        # that a field labelled "Terms version" arrives in the payload.
-        if q["type"] == "HIDDEN":
-            hidden_uuid = _uuid()
-            blocks.append(
-                {
-                    "uuid": hidden_uuid,
-                    "type": "HIDDEN_FIELDS",
-                    "groupUuid": hidden_uuid,
-                    "groupType": "HIDDEN_FIELDS",
-                    "payload": {"hiddenFields": [{"uuid": _uuid(), "name": q["label"]}]},
-                }
-            )
-            continue
-
         # The label block. This is what arrives as `label` in the webhook and
         # what the parser matches on — see forms/*.json for why it is fixed.
         label_uuid = _uuid()
@@ -97,7 +81,10 @@ def build_blocks(spec: dict) -> list[dict]:
         if q["type"] == "CHECKBOX":
             # Tally has no distinct checkbox block: it is a multiple choice
             # with allowMultiple, one block per option, all sharing a group.
-            options = q.get("options", [])
+            options = [
+                o.replace("{terms_digest}", terms_digest)
+                for o in q.get("options", [])
+            ]
             group = _uuid()
             for i, option in enumerate(options):
                 blocks.append(
@@ -167,11 +154,23 @@ def main() -> int:
     ap.add_argument("--publish", action="store_true", help="create as PUBLISHED, not DRAFT")
     ap.add_argument("--workspace", help="workspace id")
     ap.add_argument("--dry-run", action="store_true", help="print the payload, send nothing")
+    ap.add_argument(
+        "--program",
+        default="prezenti-sponsorship-trial",
+        help="policy whose terms digest is written into the acceptance option",
+    )
     args = ap.parse_args()
 
     spec = json.loads(args.spec.read_text())
+
+    # The digest of the terms this form is being built against. It is written
+    # into the acceptance option so the applicant submits the version they saw.
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from talent_engine.programs.policy import load_overlay
+
+    terms_digest = load_overlay(args.program).terms_digest()
     payload: dict = {
-        "blocks": build_blocks(spec),
+        "blocks": build_blocks(spec, terms_digest),
         "status": "PUBLISHED" if args.publish else "DRAFT",
     }
     if args.workspace:

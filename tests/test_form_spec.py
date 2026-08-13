@@ -210,11 +210,24 @@ def test_acceptance_is_stamped_with_the_version_accepted(tmp_path, spec):
 
 
 def _set_terms_version(payload, value):
+    """Rewrite the ticked acceptance option to carry `value` as its version.
+
+    The digest travels in the option text, because Tally exposes no API for
+    hidden fields and a ticked checkbox is submitted as its own text.
+    """
+    import re
+
     for f in payload["data"]["fields"]:
-        if "version" in f["label"].lower():
-            f["value"] = value
+        if "terms" not in f["label"].lower():
+            continue
+        for opt in f.get("options", []):
+            if "accept" not in opt["text"].lower():
+                continue
+            opt["text"] = re.sub(r"\s*\[terms-version:[^\]]*\]", "", opt["text"])
+            if value:
+                opt["text"] += f" [terms-version: {value}]"
             return
-    raise AssertionError("form spec has no terms version field")
+    raise AssertionError("form spec has no acceptance option")
 
 
 def test_a_stale_form_is_not_upgraded_to_the_current_terms(tmp_path, spec):
