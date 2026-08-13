@@ -35,7 +35,7 @@ the ecosystem we are trying to bring people into.
 
 ### What we ask in return
 
-A good-faith pledge of **2% of revenue** (1% to Prezenti, 1% to the Celo Community Fund) your sponsored project receives
+A good-faith pledge of **2% of revenue** to Prezenti (which routes half onward to the Celo Community Fund) your sponsored project receives
 through Celo, and of any grant or prize income you win with the sponsored work.
 Bounded in every direction:
 
