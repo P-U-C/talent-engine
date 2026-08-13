@@ -11,7 +11,7 @@ import copy
 
 import pytest
 
-from talent_engine.config import ProgramConfig, load_program
+from talent_engine.config import REFERENCE_WEIGHTS, ProgramConfig, load_program
 from talent_engine.model import DimensionScore, Evidence, Flag
 from talent_engine.scoring.engine import rank, score_snapshot
 from talent_engine.scoring.flags import has_flag
@@ -218,8 +218,27 @@ def test_recruitment_mode_disables_context_statement():
         name="senior solidity",
         mode="recruitment",
         context_statement_enabled=False,
+        # The default weights score trusted_referral, and a weighted referral
+        # dimension now requires a registry to check against (invariant 4).
+        referrers=["Internal Referrer"],
     )
     assert rec.max_points("context_statement") == 0.0
+
+
+def test_a_weighted_referral_dimension_requires_a_registry():
+    """Invariant 4: a rubric must not advertise points nobody can earn."""
+    with pytest.raises(ValueError, match="referrer registry is empty"):
+        ProgramConfig(key="bad", name="no registry", referrers=[])
+
+
+def test_an_unweighted_referral_dimension_needs_no_registry():
+    cfg = ProgramConfig(
+        key="ok",
+        name="referral not scored",
+        weights={**REFERENCE_WEIGHTS, "trusted_referral": 0},
+        referrers=[],
+    )
+    assert cfg.max_points("trusted_referral") == 0.0
 
 
 def test_keyword_matching_respects_word_boundaries(cfg):

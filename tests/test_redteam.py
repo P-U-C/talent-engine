@@ -33,6 +33,12 @@ def cfg():
     return load_program("recruit-agent-infra")
 
 
+@pytest.fixture
+def cfg_with_registry():
+    """A program that actually publishes referrers, so the check has a basis."""
+    return load_program("celo-trial")
+
+
 def score(snap, cfg):
     return score_snapshot(snap, cfg)
 
@@ -137,18 +143,29 @@ def test_the_sockpuppet_ring_outranks_every_real_profile(cfg):
     )
 
 
-def test_the_only_flagged_credible_profile_is_the_honest_one(cfg):
-    """The flag asymmetry, which is worse than the score gap.
+def test_declaring_a_referrer_is_no_longer_the_loudest_signal(cfg):
+    """The flag asymmetry is fixed: honesty must not be the thing that flags you.
 
-    A human reviewing these dossiers is warned about exactly one of them: the
-    genuine builder, because they named a referrer this program's registry does
-    not contain. Both manufactured profiles name none, and pass clean.
+    This previously asserted the bug. A human reviewing these dossiers was
+    warned about exactly one of them — the genuine builder, because they named
+    a referrer this program's registry does not contain — while both
+    manufactured profiles named none and passed clean. Declaring something
+    checkable got you flagged; declaring nothing was free.
 
-    Declaring something checkable is what gets you flagged; declaring nothing
-    is free. That is backwards, and it is a scoring-layer bug rather than a
-    collection one — an unverifiable referrer should be worth zero points
-    (it already is) without also being the loudest signal on the dossier.
+    `prezenti-sponsorship-trial` publishes no registry at all (`referrers: []`),
+    so *every* declared referrer was unverifiable by construction and the flag
+    carried no information about the applicant. It now fires only where a
+    registry exists to be checked against, which is the only case where failing
+    the check means anything.
     """
-    assert {f.key for f in score(genuine_builder(), cfg).flags} == {"unverifiable_referrer"}
+    assert {f.key for f in score(genuine_builder(), cfg).flags} == set()
     assert {f.key for f in score(sockpuppet_ring(), cfg).flags} == set()
     assert {f.key for f in score(patient_farmer(), cfg).flags} == set()
+
+
+def test_an_unverifiable_referrer_still_flags_where_a_registry_exists(cfg_with_registry):
+    """The fix must not disarm the check for programs that do publish a registry."""
+    snap = genuine_builder()
+    snap.application.referrer_name = "Someone Not On The List"
+    keys = {f.key for f in score(snap, cfg_with_registry).flags}
+    assert "unverifiable_referrer" in keys

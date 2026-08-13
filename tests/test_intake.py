@@ -500,7 +500,16 @@ def test_program_config_carries_page_copy(tmp_path):
 
     path = tmp_path / "p.json"
     path.write_text(
-        _json.dumps({"key": "p", "name": "P", "page": {"headline": "Hello"}})
+        _json.dumps(
+            {
+                "key": "p",
+                "name": "P",
+                "page": {"headline": "Hello"},
+                # Default weights score trusted_referral, which now requires
+                # a registry to check against (invariant 4).
+                "referrers": ["Example Referrer"],
+            }
+        )
     )
     cfg = ProgramConfig.load(path)
     assert cfg.page["headline"] == "Hello"

@@ -166,6 +166,19 @@ class ProgramConfig:
                 f"the rubric ({total})."
             )
 
+        # Invariant 4: no unobtainable points. Weighting `trusted_referral`
+        # without publishing a referrer registry advertises points that no
+        # applicant can earn, and every applicant who tries earns a flag
+        # instead. A rubric that cannot be satisfied is worse than one that
+        # omits the dimension, because it looks satisfiable from outside.
+        if self.weights.get("trusted_referral", 0) > 0 and not self.referrers:
+            raise ValueError(
+                f"{self.key}: trusted_referral is weighted "
+                f"({self.weights['trusted_referral']}) but the referrer registry is "
+                "empty, so those points are unobtainable. Publish a registry or set "
+                "the weight to zero."
+            )
+
     @property
     def window_days(self) -> int:
         return int(self.window_months * 30.44)

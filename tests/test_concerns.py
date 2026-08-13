@@ -90,9 +90,13 @@ def test_the_default_sentence_states_a_limit_not_an_absence():
 def test_the_sentence_reaches_the_dossier(cfg):
     snap = genuine_builder()
     text = dossier(score_snapshot(snap, cfg), cfg, snap)
-    assert concerns(score_snapshot(snap, cfg), cfg, snap) in text
+    sentence = concerns(score_snapshot(snap, cfg), cfg, snap)
+    assert sentence in text
     # Above the evidence: a reviewer reads top-down and acts on the number.
-    assert text.index("Look closer") < text.index("##")
+    # Asserted against the sentence itself rather than the "Look closer:"
+    # prefix, which only appears on the flag/composition path -- a profile
+    # that raises nothing specific still needs its caveat placed first.
+    assert text.index(sentence) < text.index("##")
 
 
 def test_the_sentence_travels_with_the_json_export(cfg):
