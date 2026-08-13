@@ -13,6 +13,7 @@ shown. These tests assert the fact itself, everywhere it is written down.
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 
@@ -26,6 +27,7 @@ OVERLAY = load_overlay("prezenti-sponsorship-trial")
 # Every published surface that states the give-back in prose.
 PROSE = [
     ROOT / "docs" / "SPONSORSHIP_TERMS.md",
+    ROOT / "docs" / "terms" / "prezenti-sponsorship-trial-2026-08-13.md",
     ROOT / "docs" / "PREZENTI_SPONSORSHIP_TRIAL.md",
     ROOT / "RUBRIC.md",
     ROOT / "README.md",
@@ -77,11 +79,12 @@ def test_the_policy_names_exactly_one_counterparty():
 def test_the_onward_commitment_is_recorded_but_is_not_an_obligation():
     onward = OVERLAY.giveback.get("prezenti_onward_commitment") or {}
     assert onward, "Prezenti's onward promise must still be published"
-    assert "bps" not in onward, (
-        "bps_of_receipts, not bps: this is a share of what Prezenti receives, "
-        "not a share of what the builder owes"
+    assert "bps" not in onward
+    assert "bps_of_receipts" not in onward, (
+        "one hundred basis points is 1% of covered income, not 1% of "
+        "Prezenti's receipts"
     )
-    assert onward["bps_of_receipts"] <= OVERLAY.giveback["total_bps"]
+    assert onward["bps_of_covered_income"] * 2 == OVERLAY.giveback["total_bps"]
 
 
 @pytest.mark.parametrize("path", PROSE, ids=lambda p: p.name)
@@ -100,3 +103,39 @@ def test_the_terms_summary_names_who_is_owed():
     joined = " ".join(OVERLAY.terms_summary()).lower()
     assert "owed to" in joined
     assert "nobody else" in joined
+    assert "half of what it receives" in joined
+    assert "1% of covered income" in joined
+
+
+def test_the_form_marker_is_derived_from_the_terms_release():
+    spec = json.loads((ROOT / "forms" / "sponsorship-application.json").read_text())
+    terms = [q for q in spec["questions"] if q.get("maps_to") == "application.accepted_terms"]
+    assert len(terms) == 1
+    option = terms[0]["options"][0]
+    assert "[terms-version: {terms_digest}]" in option
+    assert "2% of Celo revenue and grant income" in option
+
+
+def test_the_generated_landing_page_links_the_canonical_terms_release():
+    from talent_engine.server.pages import landing_page
+
+    page = landing_page("P", "formid", None, OVERLAY).decode()
+    assert OVERLAY.terms_uri in page
+    assert f"terms-version: {OVERLAY.terms_digest()}" in page
+    assert "half of what it receives" in page
+    assert "1% of covered income" in page
+
+
+def test_the_acceptance_letter_links_the_same_terms_release():
+    from talent_engine.modes.acceptance import acceptance_letter
+
+    letter = acceptance_letter("amara", OVERLAY)
+    assert OVERLAY.terms_uri in letter
+    assert OVERLAY.terms_digest() in letter
+    assert "owed to Prezenti and to nobody else" in letter
+
+
+def test_months_funded_is_not_selected_at_acceptance_anywhere_here():
+    for path in PROSE + [ROOT / "forms" / "sponsorship-application.json"]:
+        assert "monthsFundedAtSigning" not in path.read_text()
+        assert "Months funded at signing" not in path.read_text()

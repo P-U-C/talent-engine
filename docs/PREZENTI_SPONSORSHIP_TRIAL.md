@@ -89,9 +89,9 @@ applicant-controlled product identified in the sponsored build plan.
 Where that product generates on-chain revenue through Celo, 2% of revenue
 actually received is owed **to Prezenti and to nobody else**, routed through a
 public Splits contract. Prezenti separately and publicly commits to routing
-half of what it receives onward to the Celo Community Fund; that is Prezenti's
-commitment, not an obligation of the recipient, who has no agreement with the
-Fund. The recipient address must be verified in the deployment configuration
+half of what it receives onward to the Celo Community Fund, equivalent to 1% of
+covered income; that is Prezenti's commitment, not an obligation of the
+recipient, who has no agreement with the Fund. The recipient address must be verified in the deployment configuration
 before a Split is created. If the project later launches a token or creates
 value through another structure, the recipient will publicly document how they
 intend to honour the same 2% commitment. The pledge is not equity, a token

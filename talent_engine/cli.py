@@ -320,10 +320,7 @@ def cmd_tracker(args) -> int:
     overlay = load_overlay(args.program)
     # The term's months, so an absent month-three receipt is visible rather
     # than being covered by a month-one one.
-    periods = programme_periods(
-        getattr(overlay, "duration_months", 0),
-        args.start or getattr(overlay, "term_start", "") or "",
-    )
+    periods = programme_periods(overlay.duration_months, args.start or overlay.term_start)
     store = Store(args.db)
     summary = store.ledger_summary(cfg.key, periods=periods)
     if args.format == "json":
@@ -439,11 +436,36 @@ def cmd_accept(args) -> int:
         store.select_cohort(cfg.key, [handle], baseline_run_id=args.baseline or "")
 
     store.record_decision(cfg.key, handle, "accepted")
+    attestation_uid = args.attestation_uid or ""
+    if attestation_uid:
+        if not args.attestation_signer:
+            print(
+                "--attestation-uid requires --attestation-signer. Without the "
+                "builder wallet, the UID cannot prove who accepted the terms.",
+                file=sys.stderr,
+            )
+            store.close()
+            return 2
+        from .modes.attestations import AttestationValidationError, validate_attestation_uid
+
+        try:
+            validate_attestation_uid(
+                attestation_uid,
+                overlay,
+                handle=handle,
+                signer=args.attestation_signer,
+                rpc_url=args.attestation_rpc,
+            )
+        except AttestationValidationError as exc:
+            print(f"attestation rejected: {exc}", file=sys.stderr)
+            store.close()
+            return 2
+
     ok = store.record_acceptance(
         cfg.key,
         handle,
         split_address=args.split_address or "",
-        attestation_uid=args.attestation_uid or "",
+        attestation_uid=attestation_uid,
     )
     if not ok:
         print(f"could not record acceptance for {handle}", file=sys.stderr)
@@ -695,6 +717,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--overlay", help="policy key, if it differs from --program")
     s.add_argument("--split-address", help="the 0xSplits address, once it exists")
     s.add_argument("--attestation-uid", help="the signed pledge attestation")
+    s.add_argument("--attestation-signer", help="builder wallet that signed the attestation")
+    s.add_argument(
+        "--attestation-rpc",
+        default="https://forno.celo.org",
+        help="Celo JSON-RPC endpoint used to verify --attestation-uid",
+    )
     s.add_argument("--baseline", help="run id to measure this person against later")
     s.add_argument(
         "--select",
@@ -736,7 +764,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--program", required=True)
     s.add_argument(
         "--start",
-        help="first programme month, YYYY-MM; enables per-month expectations",
+        help="override first programme month, YYYY-MM; defaults to policy term_start",
     )
     s.add_argument("--format", choices=["table", "json"], default="table")
     s.set_defaults(func=cmd_tracker)

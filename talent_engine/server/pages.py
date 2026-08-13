@@ -227,10 +227,9 @@ footer .mark { width: 9rem; height: auto; color: var(--hero-ink); opacity: 0.85;
 def _embed(form_id: str, terms_version: str = "") -> str:
     """The Tally iframe, or an honest placeholder when no form is configured.
 
-    `terms_version` prefills the form's hidden field, so the submission records
-    the digest of the terms this page actually rendered. Without it the server
-    stamped whatever it considered current when the webhook arrived, and a
-    cached embed or a queued retry was recorded as acceptance of newer words.
+    The version is still present in the URL for human/debug visibility, but the
+    load-bearing value is in the checkbox option text generated from the same
+    terms release. Tally exposes no hidden-field API.
     """
     if not form_id:
         return (
@@ -269,9 +268,19 @@ def _terms_block(overlay) -> str:
     if overlay is None:
         return ""
     items = "".join(f"<li>{html.escape(line)}</li>" for line in overlay.terms_summary())
+    uri = html.escape(getattr(overlay, "terms_uri", ""), quote=True)
+    digest = html.escape(overlay.terms_digest())
+    release = html.escape(str(overlay.terms_release.get("version", "")))
+    link = (
+        f'<p>Canonical terms: <a href="{uri}">{release}</a> '
+        f'<code>terms-version: {digest}</code>.</p>'
+        if uri and release
+        else ""
+    )
     return (
         '<h2>The terms</h2>\n<div class="card"><ul class="signals">'
         f"{items}</ul>"
+        f"{link}"
         "<p>These are enforced by the code that runs this programme: a policy "
         "that takes equity, leaves the give-back uncapped, lets it run forever, "
         "or fails to state what we owe you will not load, and the service will "

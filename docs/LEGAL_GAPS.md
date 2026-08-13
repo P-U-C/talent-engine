@@ -18,7 +18,7 @@ with different standing.
 
 Now: the builder's obligation runs to **Prezenti only**, at 2%. Prezenti
 separately and publicly commits to routing half of what it receives to the Celo
-Community Fund. Asking a builder to owe something to a third party they have no
+Community Fund, equivalent to 1% of covered income. Asking a builder to owe something to a third party they have no
 agreement with — one that cannot know the obligation exists and would have no
 standing to act on it — was never going to mean anything. Prezenti's onward
 commitment is Prezenti's to keep and to be judged on. The attestation records
@@ -65,8 +65,10 @@ compensation with no employment or agency relationship created.
 ### 6. Withdrawal and pro-rating — **closed**
 
 The formula is published: `2% × (months funded ÷ 4)`. The figure is recorded
-once in the operating ledger as `months_funded` and carried in the attestation,
-so the arithmetic is checkable by anyone.
+once in the operating ledger as `months_funded` at withdrawal or term end. The
+initial pledge no longer asks the builder to guess this at acceptance; the
+close-out procedure uses a replacement attestation once the actual number is
+known, then revokes the superseded UID.
 
 ### 7. Data protection — **closed as policy, open as compliance (see C)**
 

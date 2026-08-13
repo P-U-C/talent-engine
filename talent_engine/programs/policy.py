@@ -12,8 +12,41 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _valid_month(value: str) -> bool:
+    if not isinstance(value, str) or len(value) != 7 or value[4] != "-":
+        return False
+    try:
+        year, month = int(value[:4]), int(value[5:])
+    except ValueError:
+        return False
+    return year >= 2000 and 1 <= month <= 12
+
+
+def _valid_date(value: str) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _add_months(day: date, months: int) -> date:
+    month = day.month - 1 + months
+    year = day.year + month // 12
+    month = month % 12 + 1
+    last = [31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28,
+            31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
+    return date(year, month, min(day.day, last))
 
 
 @dataclass(frozen=True)
@@ -45,6 +78,23 @@ class ProgramOverlay:
     # reads this, so the page cannot look open while the programme is not.
     status: str = "open"
     applications_close: str = ""
+    # First programme month, as YYYY-MM. The operating tracker derives its
+    # expected receipt/reimbursement/update periods from this; making it policy
+    # state prevents one month-one receipt from covering a whole term just
+    # because an operator forgot an optional CLI flag.
+    term_start: str = ""
+    # Last calendar day of the programme term, as YYYY-MM-DD. Attestation
+    # expiry is derived from this plus the sunset, so the schema field and the
+    # native EAS expiry cannot drift from the operating calendar.
+    term_end: str = ""
+    # The single versioned terms release applicants agree to. The public page
+    # links here, the Tally marker is the short hash of it, and the pledge app
+    # records the full hash.
+    terms_release: dict[str, Any] = field(default_factory=dict)
+    # On-chain attestation metadata for the trial pledge. The UID is not stored
+    # by `accept` unless the attestation matches these values and the current
+    # terms release.
+    attestation: dict[str, Any] = field(default_factory=dict)
     # Who is accountable for the operating obligations after acceptance --
     # receipts, reimbursements, the month-two Celo result, KPIs. Every ledger
     # entry requires an owner; this is the default so the common case is not a
@@ -106,10 +156,19 @@ class ProgramOverlay:
                 "they have no agreement with; use prezenti_onward_commitment."
             )
         onward = self.giveback.get("prezenti_onward_commitment") or {}
-        if onward and int(onward.get("bps_of_receipts", 0)) > total_bps:
-            raise ValueError(
-                f"{self.key}: the onward commitment cannot exceed what is received"
-            )
+        if onward:
+            if "bps_of_receipts" in onward:
+                raise ValueError(
+                    f"{self.key}: use bps_of_covered_income for the onward "
+                    "commitment. One hundred basis points is 1% of covered "
+                    "income, not 1% of Prezenti's receipts."
+                )
+            onward_bps = int(onward.get("bps_of_covered_income", 0))
+            if onward_bps * 2 != total_bps:
+                raise ValueError(
+                    f"{self.key}: the onward commitment must be half of what "
+                    "Prezenti receives, expressed as bps_of_covered_income"
+                )
 
         # An uncapped, perpetual give-back is disproportionate to an in-kind
         # grant of this size, and it selects against builders who have other
@@ -142,6 +201,28 @@ class ProgramOverlay:
         if self.status not in ("open", "closed"):
             raise ValueError(f"{self.key}: status must be open or closed")
 
+        if not _valid_month(self.term_start):
+            raise ValueError(
+                f"{self.key}: term_start must be configured as YYYY-MM so the "
+                "operating tracker is period-aware by default"
+            )
+        if not _valid_date(self.term_end):
+            raise ValueError(
+                f"{self.key}: term_end must be configured as YYYY-MM-DD so "
+                "attestation expiry is derived from the programme calendar"
+            )
+        if not self.terms_release.get("version") or not self.terms_release.get("document"):
+            raise ValueError(
+                f"{self.key}: terms_release must name one versioned canonical "
+                "terms document"
+            )
+        self._terms_document_path()
+        att = self.attestation or {}
+        if att:
+            for required in ("schema_uid", "eas_contract", "recipient", "community_fund_recipient"):
+                if not att.get(required):
+                    raise ValueError(f"{self.key}: attestation.{required} is required")
+
         if not self.commitments_to_recipient:
             raise ValueError(
                 f"{self.key}: state what the program owes the recipient. Terms that "
@@ -170,29 +251,62 @@ class ProgramOverlay:
     def is_open(self) -> bool:
         return self.status == "open"
 
-    def terms_digest(self) -> str:
-        """A short, stable fingerprint of the terms a person is agreeing to.
+    def _terms_document_path(self) -> Path:
+        document = Path(str(self.terms_release.get("document", "")))
+        if document.is_absolute() or ".." in document.parts:
+            raise ValueError(f"{self.key}: terms_release.document must be repo-relative")
+        path = ROOT / document
+        if not path.exists():
+            raise ValueError(f"{self.key}: terms release document not found: {document}")
+        return path
 
-        Recorded with each acceptance so that "they accepted the terms" means
-        something specific later. Without it, a change to the policy silently
-        rewrites what everyone who already applied is taken to have agreed to,
-        and nobody can tell afterwards which version they saw.
+    def _terms_payload(self) -> str:
+        """The canonical, versioned terms release this programme accepts.
 
-        Derived from the substantive terms only — the give-back, the upside
-        instrument, and the commitments owed to the recipient. Editing the
-        headline copy or the seat count does not invalidate an agreement about
-        obligations.
+        The form marker and pledge hash both derive from this exact payload.
+        It includes the canonical terms document and the policy fields the code
+        enforces, so changing either the words or the operative values retires
+        the previous version.
         """
+        path = self._terms_document_path()
         payload = json.dumps(
             {
+                "release": {
+                    "version": self.terms_release.get("version"),
+                    "document": str(self.terms_release.get("document")),
+                    "hash_algorithm": "sha256",
+                },
+                "document_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                 "giveback": self.giveback,
                 "upside": self.upside,
                 "commitments_to_recipient": self.commitments_to_recipient,
+                "term_start": self.term_start,
+                "term_end": self.term_end,
+                "duration_months": self.duration_months,
+                "benefits": [b.__dict__ for b in self.benefits],
             },
             sort_keys=True,
             separators=(",", ":"),
         )
-        return hashlib.sha256(payload.encode()).hexdigest()[:12]
+        return payload
+
+    def terms_hash(self) -> str:
+        """Full SHA-256 bytes32 hash of the canonical terms release."""
+        return "0x" + hashlib.sha256(self._terms_payload().encode()).hexdigest()
+
+    def terms_digest(self) -> str:
+        """Short marker stamped into the Tally acceptance option."""
+        return self.terms_hash()[2:14]
+
+    @property
+    def terms_uri(self) -> str:
+        return str(self.terms_release.get("uri") or self.terms_release.get("document") or "")
+
+    @property
+    def attestation_expiration(self) -> int:
+        end = date.fromisoformat(self.term_end)
+        expires = _add_months(end, int(self.giveback.get("sunset_months_after_term", 0)))
+        return int(datetime(expires.year, expires.month, expires.day, tzinfo=timezone.utc).timestamp())
 
     def terms_summary(self) -> list[str]:
         """The terms in one place, for logs and for the public page.
@@ -222,12 +336,12 @@ class ProgramOverlay:
             lines.insert(2, f"owed to {g['obligation_runs_to']}, and to nobody else")
         onward = g.get("prezenti_onward_commitment") or {}
         if onward:
+            covered_bps = int(onward.get("bps_of_covered_income", 0))
             lines.insert(
                 3,
-                f"Prezenti separately routes "
-                f"{int(onward.get('bps_of_receipts', 0)) / 100:.0f}% of what it "
-                f"receives onward to {onward.get('name')} — a commitment made "
-                "by Prezenti, not by you",
+                f"Prezenti separately routes half of what it receives onward to "
+                f"{onward.get('name')} — equivalent to {covered_bps / 100:.0f}% "
+                "of covered income, and a commitment made by Prezenti, not by you",
             )
         return lines
 

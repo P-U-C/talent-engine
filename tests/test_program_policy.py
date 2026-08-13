@@ -86,6 +86,10 @@ def _policy_dict():
         "kpis": copy.deepcopy(policy.kpis),
         "upside": copy.deepcopy(policy.upside),
         "commitments_to_recipient": copy.deepcopy(policy.commitments_to_recipient),
+        "term_start": policy.term_start,
+        "term_end": policy.term_end,
+        "terms_release": copy.deepcopy(policy.terms_release),
+        "attestation": copy.deepcopy(policy.attestation),
     }
 
 
@@ -125,6 +129,12 @@ def _overlay(**giveback_overrides):
             },
             "monitoring": {"inactivity_review_days": 30, "cure_days": 7},
             "giveback": giveback,
+            "term_start": "2026-09",
+            "term_end": "2026-12-29",
+            "terms_release": {
+                "version": "test-terms",
+                "document": "docs/terms/prezenti-sponsorship-trial-2026-08-13.md",
+            },
             "commitments_to_recipient": {
                 "retains_all_ip_and_equity": True,
                 "may_withdraw_without_penalty": True,
@@ -160,6 +170,9 @@ def test_taking_equity_is_refused_at_this_cheque_size():
         "benefits": [{"key": "b", "monthly_usd": 100, "months": 4}],
         "selection": base.selection, "monitoring": base.monitoring,
         "giveback": base.giveback,
+        "term_start": base.term_start,
+        "term_end": base.term_end,
+        "terms_release": base.terms_release,
         "commitments_to_recipient": base.commitments_to_recipient,
         "upside": {"equity_taken": True},
     }
@@ -178,6 +191,9 @@ def test_terms_must_run_both_ways():
         "benefits": [{"key": "b", "monthly_usd": 100, "months": 4}],
         "selection": base.selection, "monitoring": base.monitoring,
         "giveback": base.giveback,
+        "term_start": base.term_start,
+        "term_end": base.term_end,
+        "terms_release": base.terms_release,
     }
     with pytest.raises(ValueError, match="owes the recipient"):
         ProgramOverlay.from_dict(data)
@@ -194,6 +210,33 @@ def test_the_giveback_scales_with_what_was_actually_received():
     assert o.giveback_owed_bps(2) == 100
     assert o.giveback_owed_bps(4) == 200
     assert o.giveback_owed_bps(99) == 200  # cannot exceed the full term
+
+
+def test_onward_commitment_is_half_of_prezentis_receipts():
+    o = _overlay(prezenti_onward_commitment={"name": "Fund", "bps_of_covered_income": 100})
+    onward = o.giveback["prezenti_onward_commitment"]
+    assert onward["bps_of_covered_income"] * 2 == o.giveback["total_bps"]
+
+    with pytest.raises(ValueError, match="bps_of_covered_income"):
+        _overlay(prezenti_onward_commitment={"name": "Fund", "bps_of_receipts": 100})
+
+    with pytest.raises(ValueError, match="half"):
+        _overlay(prezenti_onward_commitment={"name": "Fund", "bps_of_covered_income": 50})
+
+
+def test_the_terms_release_drives_both_form_marker_and_pledge_hash():
+    o = load_overlay("prezenti-sponsorship-trial")
+    assert o.terms_hash().startswith("0x")
+    assert len(o.terms_hash()) == 66
+    assert o.terms_digest() == o.terms_hash()[2:14]
+    assert o.terms_release["document"] == "docs/terms/prezenti-sponsorship-trial-2026-08-13.md"
+
+
+def test_the_tracker_calendar_is_policy_state():
+    o = load_overlay("prezenti-sponsorship-trial")
+    assert o.term_start == "2026-09"
+    assert o.term_end == "2026-12-29"
+    assert o.attestation_expiration > 0
 
 
 def test_the_live_program_carries_the_agreed_terms():

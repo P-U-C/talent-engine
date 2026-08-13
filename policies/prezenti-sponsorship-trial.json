@@ -60,8 +60,8 @@
     "prezenti_onward_commitment": {
       "name": "Celo Community Fund",
       "address_env": "CELO_COMMUNITY_FUND_ADDRESS",
-      "bps_of_receipts": 100,
-      "note": "Prezenti's own commitment to route half of what it receives under these pledges onward. It is not an obligation of the builder, who owes 2% to Prezenti and nothing to anyone else."
+      "bps_of_covered_income": 100,
+      "note": "Prezenti's own commitment to route half of what it receives under these pledges onward, equivalent to 1% of covered income. It is not an obligation of the builder, who owes 2% to Prezenti and nothing to anyone else."
     }
   },
   "kpis": {
@@ -88,5 +88,19 @@
   },
   "status": "open",
   "applications_close": "2026-08-25",
+  "term_start": "2026-09",
+  "term_end": "2026-12-29",
+  "terms_release": {
+    "version": "prezenti-sponsorship-trial-2026-08-13",
+    "document": "docs/terms/prezenti-sponsorship-trial-2026-08-13.md",
+    "uri": "https://github.com/prezenti/talent-engine/blob/main/docs/terms/prezenti-sponsorship-trial-2026-08-13.md"
+  },
+  "attestation": {
+    "chain_id": 42220,
+    "eas_contract": "0x72E1d8ccf5299fb36fEfD8CC4394B8ef7e98Af92",
+    "schema_uid": "0x6a5f8c4f58911419d3ae8a67df4f342eea92c0d2167b5b814eaa6d450e9135f4",
+    "recipient": "0xA5c9389A0Ce1bFe24FF883E761Ff313225C77D44",
+    "community_fund_recipient": "0xD533Ca259b330c7A88f74E000a3FaEa2d63B7972"
+  },
   "operating_owner": "zozDOTeth"
 }
