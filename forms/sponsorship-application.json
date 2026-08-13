@@ -93,17 +93,9 @@
       "required": true,
       "maps_to": "application.accepted_terms",
       "options": [
-        "I have read the terms at sponsorships.prezenti.xyz and I accept them: 2% of Celo revenue and grant income, capped at $14,000, expiring 36 months after the term, pro-rated by the months I receive. No equity is taken. I keep all IP and may withdraw at any time without penalty."
+        "I have read the terms at sponsorships.prezenti.xyz and I accept them: 2% of Celo revenue and grant income, capped at $14,000, expiring 36 months after the term, pro-rated by the months I receive. No equity is taken. I keep all IP and may withdraw at any time without penalty. [terms-version: {terms_digest}]"
       ],
-      "why": "Terms displayed on a page are not agreement; an affirmative act is. The option text restates the substance so nobody accepts a link they did not open, and the version accepted is stamped on the submission \u2014 otherwise editing the policy silently rewrites what everyone who already applied is taken to have agreed to."
-    },
-    {
-      "label": "Terms version",
-      "type": "HIDDEN",
-      "required": true,
-      "maps_to": "application.accepted_terms_version",
-      "prefill_from": "query:terms_version",
-      "why": "The digest of the terms this form was rendered with, submitted by the applicant rather than stamped by the server. Stamping the server's current digest on arrival recorded acceptance of words a stale form, a cached embed or a queued retry never showed them. Absent means unknown, and the acceptance gate treats unknown as not-current."
+      "why": "Terms displayed on a page are not agreement; an affirmative act is. The option text restates the substance so nobody accepts a link they did not open, and it carries the digest of the terms it was written against. A ticked checkbox is submitted as its own option text, so the applicant transmits the version they actually saw \u2014 Tally has no API for hidden fields, and stamping the server's current digest when the webhook arrives recorded acceptance of words a stale form never showed. Changing the terms changes the digest, which changes this text, which is exactly the re-consent that should be required."
     }
   ]
 }

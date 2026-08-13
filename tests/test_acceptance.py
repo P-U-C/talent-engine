@@ -51,6 +51,10 @@ def test_the_letter_carries_the_bounds_not_just_the_ask(overlay):
     assert "Capped at $14,000" in letter
     assert "expires 36 months" in letter
     assert "pro-rated" in letter
+    assert "owed to Prezenti and to nobody else" in letter
+    assert "half of what it receives" in letter
+    assert "1% of covered income" in letter
+    assert overlay.terms_digest() in letter
 
 
 def test_the_letter_says_what_the_programme_owes(overlay):

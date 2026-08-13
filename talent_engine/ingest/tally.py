@@ -55,9 +55,16 @@ TERMS_KEYS = (
     "terms",
 )
 
-# A hidden field carrying the terms digest the form was rendered with. Checked
-# before TERMS_KEYS below, because "terms version" also contains "terms" and
-# would otherwise be read as the acceptance checkbox itself.
+# The acceptance option carries the digest of the terms it was written
+# against, as "[terms-version: <hex>]". Tally exposes no API for hidden fields,
+# and a ticked checkbox is submitted as its own option text — so this is the
+# one channel that transmits what the applicant actually saw. Stamping the
+# server's current digest when the webhook arrived recorded acceptance of
+# words a stale form, cached embed or queued retry never showed them.
+TERMS_VERSION_RE = re.compile(r"\[terms-version:\s*([0-9a-f]{6,64})\]", re.I)
+
+# A hidden field, if a deployment adds one by hand in the Tally builder.
+# Checked before TERMS_KEYS, because "terms version" also contains "terms".
 TERMS_VERSION_KEYS = ("terms version", "terms_version", "termsversion")
 
 # Field types Tally uses for contact information, regardless of the label the
@@ -299,7 +306,7 @@ def parse_webhook(payload: dict[str, Any]) -> Submission:
     # showed them.
     application = Application(
         accepted_terms=accepted,
-        accepted_terms_version=pick(TERMS_VERSION_KEYS),
+        accepted_terms_version=_terms_version(terms_raw, pick(TERMS_VERSION_KEYS)),
         context_statement=pick(CONTEXT_KEYS),
         context_factors=pick_list(FACTOR_KEYS),
         referrer_name=pick(REFERRER_KEYS),
@@ -338,6 +345,19 @@ def _first_email(values: list[tuple[str, str, Any]]) -> str:
         if match and flat == match.group(0):
             return flat
     return ""
+
+
+def _terms_version(accepted_text: str, hidden_field: str) -> str:
+    """The terms digest the applicant submitted, or empty if unknown.
+
+    Empty is a meaningful answer: the acceptance gate treats an unknown version
+    as not-current and fails closed, which is the correct reading of "we do not
+    know which words they agreed to".
+    """
+    match = TERMS_VERSION_RE.search(accepted_text or "")
+    if match:
+        return match.group(1).lower()
+    return (hidden_field or "").strip()
 
 
 def _safe_extra(values: list[tuple[str, str, Any]]) -> dict[str, Any]:

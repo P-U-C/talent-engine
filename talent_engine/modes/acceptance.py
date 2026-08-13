@@ -124,7 +124,14 @@ def acceptance_letter(
         f"  · {g.get('total_bps', 0) / 100:.0f}% of revenue your sponsored project "
         "receives through Celo, and of any grant or prize income you win with"
     )
-    add("    this work.")
+    add("    this work, owed to Prezenti and to nobody else.")
+    onward = g.get("prezenti_onward_commitment") or {}
+    if onward:
+        add(
+            "  · Prezenti routes half of what it receives onward to "
+            f"{onward.get('name')} — equivalent to "
+            f"{int(onward.get('bps_of_covered_income', 0)) / 100:.0f}% of covered income."
+        )
     add(f"  · Capped at ${cap:,.0f} in total. It cannot exceed that, ever.")
     add(
         f"  · It expires {g.get('sunset_months_after_term')} months after the "
@@ -179,4 +186,8 @@ def acceptance_letter(
         add("  1. We will send you the give-back split address shortly.")
     add(f"  2. Sign the pledge at {PLEDGE_APP} — it records the terms above")
     add("     publicly, so what was agreed is legible to everyone including you.")
+    add(
+        f"     Canonical terms: {overlay.terms_uri} "
+        f"(terms-version {overlay.terms_digest()})."
+    )
     return "\n".join(lines)

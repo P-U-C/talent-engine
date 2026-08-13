@@ -757,7 +757,11 @@ def programme_periods(duration_months: int, start: str) -> list[str]:
     """The 'YYYY-MM' keys a term of this length covers, from its start month."""
     if not start or duration_months <= 0:
         return []
+    if len(start) != 7 or start[4] != "-":
+        raise ValueError("programme start must be YYYY-MM")
     year, month = int(start[:4]), int(start[5:7])
+    if not 1 <= month <= 12:
+        raise ValueError("programme start month must be 01..12")
     out = []
     for _ in range(duration_months):
         out.append(f"{year:04d}-{month:02d}")
