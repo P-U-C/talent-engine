@@ -35,7 +35,7 @@ the ecosystem we are trying to bring people into.
 
 ### What we ask in return
 
-A good-faith pledge of **2% of revenue** your sponsored project receives
+A good-faith pledge of **2% of revenue** (1% to Prezenti, 1% to the Celo Community Fund) your sponsored project receives
 through Celo, and of any grant or prize income you win with the sponsored work.
 Bounded in every direction:
 
@@ -94,7 +94,7 @@ shipping.
 ```bash
 git clone https://github.com/prezenti/talent-engine
 cd talent-engine
-python3 -m pytest tests/ -q                       # 174 tests, no network needed
+python3 -m pytest tests/ -q                       # 244 tests, no network needed
 export GITHUB_TOKEN=...
 python3 -m talent_engine.cli score \
     --program prezenti-sponsorship-trial --handles YOUR_HANDLE
