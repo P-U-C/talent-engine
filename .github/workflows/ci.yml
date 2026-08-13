@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The scoring core is standard library only and the suite makes no
+      # network calls, so there is nothing to install.
+      - name: Tests
+        run: python3 -m pytest -q
+
+      # RUBRIC.md is the promise that a candidate can reproduce their own
+      # score. It silently documented one programme's weights while a
+      # different programme did the scoring, so the table is generated and
+      # this fails the build when the two disagree.
+      - name: Published rubric matches the configs
+        run: python3 tools/render_rubric_weights.py --check
+
+      # Only meaningful in a deployment fork, where README.md and
+      # docs/ENGINE.md belong to the deployment and an upstream merge will
+      # quietly take them. Skipped upstream, where the script does not exist.
+      - name: Deployment-owned files survived
+        run: |
+          if [ -x tools/sync-from-upstream.sh ]; then
+            tools/sync-from-upstream.sh --check
+          else
+            echo "not a deployment fork; nothing to check"
+          fi
+
+      - name: No cache or database committed
+        run: |
+          if git ls-files | grep -Ei '\.sqlite3?$|^\.cache/'; then
+            echo "A cache or database file is tracked. These hold raw API"
+            echo "responses about real people and this repository is public."
+            exit 1
+          fi
+          echo "ok: no cache or database tracked"
