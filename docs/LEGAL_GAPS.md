@@ -1,71 +1,117 @@
 # Open legal questions
 
-Not legal advice, and not decisions this repository can make. Listed here so
-they are tracked rather than remembered, and so that anyone reading the terms
-can see what is unsettled. Each needs an answer from counsel before the first
-acceptance, not before publication.
+Not legal advice. Most of what was listed here was a drafting problem rather
+than a legal one, and drafting problems are fixable without counsel. Those are
+now closed in `SPONSORSHIP_TERMS.md` and recorded below so the reasoning is
+visible. What remains genuinely needs a lawyer, and needs one before the first
+acceptance rather than before publication.
 
-## 1. What the give-back actually is
+---
 
-The pledge is described as good faith, uncapped by any security interest, and
-enforced reputationally. That is a coherent position, but it needs confirming
-that a public on-chain attestation reciting a percentage of revenue does not
-create an enforceable obligation, a security interest, or a revenue-share
-arrangement in the recipient's jurisdiction — particularly where the recipient
-is outside the programme's own jurisdiction, which is the common case for this
-cohort.
+## Closed by drafting
 
-## 2. Two counterparties, one pledge
+### 1. Two counterparties, one pledge — **closed**
 
-`docs/PREZENTI_SPONSORSHIP_TRIAL.md` splits the give-back 1% to Prezenti and 1%
-to the Celo Community Fund. The application-facing copy says "2%". These are the
-same number but not the same commitment, and they run to different parties with
-different standing to enforce. The pledge instrument needs to record both legs
-explicitly, and someone needs to decide whether the Celo Community Fund leg is a
-commitment *to* the Fund or a statement of intent *about* it.
+Was: the trial doc split the give-back 1% to Prezenti and 1% to the Celo
+Community Fund, while the application copy said "2%". Same number, two parties
+with different standing.
 
-## 3. Governing law and dispute resolution
+Now: the builder's obligation runs to **Prezenti only**, at 2%. Prezenti
+separately and publicly commits to routing half of what it receives to the Celo
+Community Fund. Asking a builder to owe something to a third party they have no
+agreement with — one that cannot know the obligation exists and would have no
+standing to act on it — was never going to mean anything. Prezenti's onward
+commitment is Prezenti's to keep and to be judged on. The attestation records
+both legs so the second is as public as the first.
 
-The current pledge hardcodes `governingLaw = "Celo Community Governance"` and
-`disputeResolution = "Celo Governance Proposals and Arbitration"`. For an
-obligation running from a builder to Prezenti, that is probably the wrong forum
-and arguably not a forum at all. Needs a real answer before any new attestation
-records it.
+### 2. Governing law and dispute resolution — **closed**
 
-## 4. Right of first offer
+Was: the pledge hardcoded `governingLaw = "Celo Community Governance"` and
+`disputeResolution = "Celo Governance Proposals and Arbitration"`.
 
-The ROFO is described as a right to be *offered* participation in a future
-round with 14 days' notice, never an obligation. Whether that survives contact
-with a term sheet — and whether it needs to be disclosed to a future lead
-investor — is a question for counsel, not for the rubric.
+Now: the terms state that the pledge specifies **no governing law and is not
+subject to arbitration**, because naming a forum for a commitment nobody
+intends to enforce implies the opposite of what is meant. The old values are
+not carried into the new schema. This is the honest position for a
+reputational commitment; if counsel decides the pledge should be enforceable,
+this reopens as question A below.
 
-## 5. Tooling paid for by a third party
+### 3. What the give-back is — **closed as drafting, open as risk (see A)**
 
-The programme reimburses vendor subscriptions bought in the recipient's own
-name. Who owns the account, what happens to it at month four, and whether any
-vendor's terms prohibit third-party payment or transfer, are unresolved. Vendor
-offsets (credits given to Prezenti instead of cash) may also have tax treatment
-distinct from reimbursement.
+The terms now say plainly that the pledge is a good-faith commitment intended
+to be unenforceable, creating no security interest, lien, charge, debt,
+royalty, revenue-share, equity, option or cap-table entry, and giving Prezenti
+no claim over the builder's company, assets or financings.
 
-## 6. Withdrawal and pro-rating
+That is a clear statement of intent. Whether it is *effective* in a given
+jurisdiction is question A.
 
-Terms allow withdrawal at any time with the give-back scaling to months
-actually taken. The mechanism for computing and recording that is now in the
-operating ledger (`months_funded`), but whether a pro-rated obligation survives
-withdrawal at all, and for how long, is a drafting question.
+### 4. Right of first offer — **closed**
 
-## 7. Data protection
+Now stated as: offer not refusal; no matching, pro-rata, information or veto
+right; notice by email; silence for 14 days ends it for that round; does not
+survive a change of control; not assignable; expires with the give-back. A
+builder can honestly tell a lead investor that nobody holds rights over the
+round.
 
-Applications collect contact details and free text from applicants who may be
-anywhere. Contact data is quarantined from scoring and dossiers, and free text
-is redacted for contact shapes, which is a good technical posture but not a
-lawful-basis analysis. Retention periods, deletion on request, and the basis
-for scouting people who never applied all need a position.
+### 5. Tooling paid for by a third party — **closed**
 
-## 8. Public record of unsuccessful applicants
+Accounts are bought by the builder in their own name and reimbursed against a
+receipt, so nothing transfers at the end of the term and the account was never
+Prezenti's. Vendor-terms compliance sits with the builder, vendor offsets are
+recorded in the operating ledger, and reimbursement is explicitly not
+compensation with no employment or agency relationship created.
 
-The programme commits to feedback for everyone who applied. Nothing publishes
-an unsuccessful applicant's name or score, and it should stay that way — but
-the commitment to a "public record that we backed you" for recipients needs an
-explicit consent step, which currently rides on acceptance rather than being
-asked separately.
+### 6. Withdrawal and pro-rating — **closed**
+
+The formula is published: `2% × (months funded ÷ 4)`. The figure is recorded
+once in the operating ledger as `months_funded` and carried in the attestation,
+so the arithmetic is checkable by anyone.
+
+### 7. Data protection — **closed as policy, open as compliance (see C)**
+
+Retention (trial plus twelve months), deletion on request, separation of
+contact data from anything scoreable, and the distinction between applicants
+who consent and scouted people assessed only on already-public activity are all
+now stated. Whether that constitutes a lawful basis in every jurisdiction an
+applicant might sit in is question C.
+
+### 8. Public record of unsuccessful applicants — **closed**
+
+The public record of backing is now a separate explicit opt-in at acceptance
+rather than something riding on acceptance itself. Declining changes nothing
+else. Nobody unselected is ever named publicly.
+
+---
+
+## Still needs counsel
+
+### A. Does the disclaimer hold?
+
+The terms say the pledge is unenforceable and creates no security interest. A
+public, signed, on-chain attestation reciting a percentage of revenue with a
+cap and an expiry has the *shape* of an instrument, and a builder's future
+investor or acquirer may treat it as one regardless of what the text says.
+Needs confirming in the jurisdictions this cohort will actually sit in, which
+for this programme means outside the programme's own. **This is the one that
+matters most**, because every other closure above assumes the answer is yes.
+
+### B. Is Prezenti's onward commitment a promise to anyone?
+
+Prezenti now publicly commits to routing 1% to the Celo Community Fund. Whether
+that creates an obligation the Fund could rely on, whether it should be
+formalised with them, and what happens if the Fund's structure changes over the
+36 months, are questions for Prezenti's own counsel rather than the builder's.
+
+### C. Lawful basis, and scouting people who never applied
+
+The engine assesses people from public GitHub activity and contacts them to
+invite an application. Retention and deletion are now stated, but the lawful
+basis for the scouting itself, and the notice owed to someone assessed without
+having applied, need a position under the relevant data-protection regimes.
+
+### D. Tax treatment of reimbursements and vendor offsets
+
+Reimbursing a builder's subscription and receiving a vendor credit instead of
+cash are not obviously the same thing for either party. Neither is stated to be
+compensation, but stating it does not settle it.
