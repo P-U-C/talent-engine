@@ -86,14 +86,16 @@ dossiers and decision rationales will be published with recipient consent.
 Each recipient makes a public 2% good-faith give-back pledge covering the
 applicant-controlled product identified in the sponsored build plan.
 
-Where that product generates on-chain revenue through Celo, 1% of revenue
-actually received will be routed to Prezenti and 1% to the Celo Community Fund
-through a public Splits contract. Both complete recipient addresses must be
-verified in the deployment configuration before a Split is created. If the
-project later launches a token or
-creates value through another structure, the recipient will publicly document
-how they intend to honour the same 1%/1% commitment. The pledge is not equity,
-a token warrant or an investment agreement.
+Where that product generates on-chain revenue through Celo, 2% of revenue
+actually received is owed **to Prezenti and to nobody else**, routed through a
+public Splits contract. Prezenti separately and publicly commits to routing
+half of what it receives onward to the Celo Community Fund; that is Prezenti's
+commitment, not an obligation of the recipient, who has no agreement with the
+Fund. The recipient address must be verified in the deployment configuration
+before a Split is created. If the project later launches a token or creates
+value through another structure, the recipient will publicly document how they
+intend to honour the same 2% commitment. The pledge is not equity, a token
+warrant or an investment agreement.
 
 An empty Split is not an outcome. Deployment of the give-back mechanism is
 reported only when a sponsored product has revenue to route.
