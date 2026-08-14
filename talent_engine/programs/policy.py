@@ -359,9 +359,18 @@ class ProgramOverlay:
         drift from what is actually enforced.
         """
         g = self.giveback
+        labels = {
+            "claude_max_20x": "Claude Max 20x",
+            "chatgpt_pro_5x": "ChatGPT Pro 5x",
+            "flexible_allowance": "flexible allowance",
+        }
+        benefit_names = ", ".join(
+            labels.get(b.key, b.key.replace("_", " ")) for b in self.benefits
+        )
         lines = [
             f"{self.seats} places, {self.duration_months} months, "
-            f"${self.per_person_usd:,.0f} each (${self.total_budget_usd:,.0f} total)",
+            f"${self.per_person_usd:,.0f} each (${self.total_budget_usd:,.0f} total): "
+            f"{benefit_names}",
             f"give-back {g.get('total_bps', 0) / 100:.0f}% of {self.covered_income_text()} "
             f"Capped at ${self.giveback_cap_usd:,.0f}, expiring "
             f"{g.get('sunset_months_after_term')} months after the term, "
