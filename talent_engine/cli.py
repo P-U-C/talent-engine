@@ -549,6 +549,7 @@ def cmd_accept(args) -> int:
             attestation_uid=attestation_uid,
             attestation_signer=args.attestation_signer,
             override=override_event,
+            capacity=overlay.seats,
         )
     except ValueError as exc:
         print(str(exc), file=sys.stderr)

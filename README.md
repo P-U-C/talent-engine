@@ -70,7 +70,7 @@ this cheque size the relationship is the entire return:
 - You keep **all IP and all equity**. We take none.
 - **No exclusivity.** Take other funding, other grants, other work.
 - **Withdraw at any time without penalty**, with the give-back scaling down.
-- A **public record** that we backed you, with the evidence.
+- A **public record** that we backed you through the mandatory pledge. Any dossier, announcement or evidence package beyond that requires separate consent.
 - **Introductions** where we can make them.
 - **Your score and every piece of evidence behind it**, shared with you.
 - **Feedback if you are not selected.** Everyone, not just the shortlist.
@@ -105,6 +105,8 @@ shipping.
 ```bash
 git clone https://github.com/prezenti/talent-engine
 cd talent-engine
+python3 -m compileall -q talent_engine tests       # dependency-free syntax check
+python3 -m pip install pytest                      # development dependency for full suite
 python3 -m pytest tests/ -q                       # full local suite, no network needed
 export GITHUB_TOKEN=...
 python3 -m talent_engine.cli score \

@@ -375,8 +375,9 @@ class ProgramOverlay:
             f"Capped at ${self.giveback_cap_usd:,.0f}, expiring "
             f"{g.get('sunset_months_after_term')} months after the term, "
             "pro-rated by months received",
-            f"monthly public updates; {self.monitoring.get('inactivity_review_days')} days inactive "
-            f"triggers review with a {self.monitoring.get('cure_days')}-day cure period",
+            f"monthly receipts for reimbursement; monthly public updates; "
+            f"{self.monitoring.get('inactivity_review_days')} days inactive triggers "
+            f"review with a {self.monitoring.get('cure_days')}-day cure period",
             "continued months three and four require a month-two Celo deployment, integration or material contribution",
             f"equity taken: {'yes' if self.upside.get('equity_taken') else 'none'}"
             + (
