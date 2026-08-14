@@ -172,7 +172,13 @@ def test_months_funded_is_not_selected_at_acceptance_anywhere_here():
 
 
 def test_fresh_clone_docs_do_not_advertise_a_missing_console_script():
-    text = (ROOT / "docs" / "ENGINE.md").read_text()
-    assert not re.search(r"(?m)^talent-engine\s+", text)
-    assert "python3 -m talent_engine.cli score" in text
-    assert "python3 -m talent_engine.cli serve" in text
+    paths = [ROOT / "README.md"]
+    engine_doc = ROOT / "docs" / "ENGINE.md"
+    if engine_doc.exists():
+        paths.append(engine_doc)
+    texts = [p.read_text() for p in paths]
+    for text in texts:
+        assert not re.search(r"(?m)^talent-engine\s+", text)
+    joined = "\n".join(texts)
+    assert "python3 -m talent_engine.cli score" in joined
+    assert "python3 -m talent_engine.cli serve" in joined
