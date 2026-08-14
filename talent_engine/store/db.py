@@ -440,16 +440,32 @@ class Store:
         in one transaction.
         """
         row = self.conn.execute(
-            "SELECT 1 FROM cohort WHERE program = ? AND handle = ?", (program, handle)
+            "SELECT * FROM cohort WHERE program = ? AND handle = ?", (program, handle)
         ).fetchone()
         if not row:
             return False
         if not ((payment_address or split_address) and attestation_uid and attestation_signer):
             raise ValueError("acceptance requires payment address, attestation UID and signer")
+        existing = dict(row)
+        wanted_payment = payment_address or split_address
+        if existing.get("accepted_at"):
+            same = (
+                existing.get("payment_address") == wanted_payment
+                and existing.get("split_address") == (split_address or payment_address)
+                and existing.get("attestation_uid") == attestation_uid
+                and existing.get("attestation_signer") == attestation_signer
+                and (
+                    months_received is None
+                    or int(existing.get("months_received") or 0) == months_received
+                )
+            )
+            if same:
+                return True
+            raise ValueError("candidate is already accepted with different artefacts")
         sets, params = ["accepted_at = ?"], [utc_now_iso()]
         if payment_address or split_address:
             sets.append("payment_address = ?")
-            params.append(payment_address or split_address)
+            params.append(wanted_payment)
             sets.append("split_address = ?")
             params.append(split_address or payment_address)
         if attestation_uid:
@@ -481,6 +497,7 @@ class Store:
         attestation_uid: str,
         attestation_signer: str,
         override: tuple[list[str], str, str] | None = None,
+        capacity: int | None = None,
     ) -> bool:
         """Atomically select, accept, and attach required artefacts."""
         if not (payment_address and attestation_uid and attestation_signer):
@@ -490,15 +507,35 @@ class Store:
             with self.conn:
                 if self.is_quarantined(program, handle):
                     raise ValueError(f"{handle} is quarantined and cannot be accepted")
+                existing_row = self.conn.execute(
+                    "SELECT * FROM cohort WHERE program = ? AND handle = ?", (program, handle)
+                ).fetchone()
+                if existing_row and existing_row["accepted_at"]:
+                    existing = dict(existing_row)
+                    if (
+                        existing.get("payment_address") == payment_address
+                        and existing.get("split_address") == payment_address
+                        and existing.get("attestation_uid") == attestation_uid
+                        and existing.get("attestation_signer") == attestation_signer
+                    ):
+                        return True
+                    raise ValueError("candidate is already accepted with different artefacts")
+                if capacity is not None:
+                    accepted_count = self.conn.execute(
+                        "SELECT COUNT(*) FROM cohort WHERE program = ? AND accepted_at != ''",
+                        (program,),
+                    ).fetchone()[0]
+                    if accepted_count >= capacity:
+                        raise ValueError(
+                            f"acceptance capacity reached for {program}: {accepted_count}/{capacity}"
+                        )
                 if selected:
                     self.conn.execute(
                         "INSERT OR REPLACE INTO cohort (program, handle, declared_repo, "
                         "baseline_run_id, selected_at) VALUES (?, ?, ?, ?, ?)",
                         (program, handle, declared_repo, baseline_run_id, now),
                     )
-                elif not self.conn.execute(
-                    "SELECT 1 FROM cohort WHERE program = ? AND handle = ?", (program, handle)
-                ).fetchone():
+                elif not existing_row:
                     return False
                 if override:
                     gates, steward, reason = override

@@ -36,7 +36,10 @@ COMMITMENT_TEXT = {
         "You can withdraw at any time without penalty, and the give-back scales "
         "down to what you actually received."
     ),
-    "public_record_of_backing": "We say publicly that we backed you, with the evidence.",
+    "public_record_of_backing": (
+        "The mandatory pledge publicly records that we backed you; any dossier, "
+        "announcement or evidence package beyond that needs separate consent."
+    ),
     "introductions_on_request": "Introductions where we can make them — just ask.",
     "score_and_evidence_shared_with_applicant": (
         "Your score and every piece of evidence behind it, shared with you."
@@ -129,6 +132,7 @@ def acceptance_letter(
         "  · It is pro-rated by the months you actually take. Leave early and "
         "you owe proportionally less."
     )
+    add("  · Monthly receipts are required for reimbursement.")
     add("  · One monthly public update on what you are building.")
     add(
         f"  · {overlay.monitoring.get('inactivity_review_days')} days without "

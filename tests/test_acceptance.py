@@ -52,6 +52,7 @@ def test_the_letter_carries_the_bounds_not_just_the_ask(overlay):
     assert "owed to Prezenti and to nobody else" in letter
     assert "half of what it receives" in letter
     assert "1% of covered income" in letter
+    assert "Monthly receipts" in letter
     assert "One monthly public update" in letter
     assert "30 days without" in letter
     assert "7 days to provide evidence" in letter
@@ -74,6 +75,8 @@ def test_the_letter_says_what_the_programme_owes(overlay):
     assert "keep all IP" in letter
     assert "withdraw at any time without penalty" in letter
     assert "No exclusivity" in letter
+    assert "separate consent" in letter
+    assert "with the evidence" not in letter
 
 
 def test_the_letter_shares_the_score_and_its_caveat(overlay):
@@ -131,6 +134,80 @@ def test_accept_candidate_writes_selection_decision_and_artifacts_atomically(tmp
     assert store.overrides("p", "amara-dev")[0]["steward"] == "steward"
     events = store.attestation_events("p", "amara-dev")
     assert [(e["event_type"], e["uid"]) for e in events] == [("initial", "0xuid")]
+    store.close()
+
+
+def test_accept_candidate_enforces_capacity_inside_the_transaction(tmp_path):
+    store = Store(tmp_path / "t.db")
+    for i in range(5):
+        assert store.accept_candidate(
+            "p",
+            f"builder-{i}",
+            selected=True,
+            payment_address="0xsafe",
+            attestation_uid=f"0xuid{i}",
+            attestation_signer=f"0xsigner{i}",
+            capacity=5,
+        )
+
+    with pytest.raises(ValueError, match="capacity"):
+        store.accept_candidate(
+            "p",
+            "builder-5",
+            selected=True,
+            payment_address="0xsafe",
+            attestation_uid="0xuid5",
+            attestation_signer="0xsigner5",
+            capacity=5,
+        )
+
+    assert "builder-5" not in {r["handle"] for r in store.cohort("p")}
+    assert not [r for r in store.decisions("p") if r["handle"] == "builder-5"]
+    assert store.attestation_events("p", "builder-5") == []
+    store.close()
+
+
+def test_accept_candidate_retry_is_noop_but_changed_artifacts_fail(tmp_path):
+    store = Store(tmp_path / "t.db")
+    assert store.accept_candidate(
+        "p",
+        "amara-dev",
+        selected=True,
+        baseline_run_id="run_x",
+        declared_repo="amara/project",
+        payment_address="0xsafe",
+        attestation_uid="0xuid",
+        attestation_signer="0xsigner",
+        capacity=5,
+    )
+    first = store.cohort("p")[0]
+    first_events = store.attestation_events("p", "amara-dev")
+
+    assert store.accept_candidate(
+        "p",
+        "amara-dev",
+        selected=False,
+        payment_address="0xsafe",
+        attestation_uid="0xuid",
+        attestation_signer="0xsigner",
+        capacity=5,
+    )
+    assert store.cohort("p")[0] == first
+    assert store.attestation_events("p", "amara-dev") == first_events
+    assert len(store.decisions("p")) == 1
+
+    with pytest.raises(ValueError, match="different artefacts"):
+        store.accept_candidate(
+            "p",
+            "amara-dev",
+            selected=False,
+            payment_address="0xsafe",
+            attestation_uid="0xchanged",
+            attestation_signer="0xsigner",
+            capacity=5,
+        )
+    assert store.cohort("p")[0] == first
+    assert store.attestation_events("p", "amara-dev") == first_events
     store.close()
 
 

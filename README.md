@@ -23,6 +23,8 @@ must be able to clone this and reproduce their number with no install step.
 
 ```
 git clone https://github.com/P-U-C/talent-engine && cd talent-engine
+python3 -m compileall -q talent_engine tests       # dependency-free syntax check
+python3 -m pip install pytest                      # development dependency for full suite
 python3 -m pytest tests/ -q
 ```
 

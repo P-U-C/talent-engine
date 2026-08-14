@@ -126,6 +126,7 @@ def test_the_form_marker_is_derived_from_the_terms_release():
     assert OVERLAY.covered_income_text() in option
     assert "Claude Max 20x, ChatGPT Pro 5x" in option
     assert "paid directly to the verified Prezenti Safe" in option
+    assert "monthly receipts" in option
     assert "monthly public updates" in option
     assert "30 days inactive" in option
     assert "7-day cure period" in option
@@ -143,6 +144,7 @@ def test_the_generated_landing_page_links_the_canonical_terms_release():
     assert "half of what it receives" in page
     assert "1% of covered income" in page
     assert "direct to the verified Prezenti Safe" in page
+    assert "monthly receipts" in page
     assert "monthly public updates" in page
     assert "30 days inactive" in page
     assert "7-day cure period" in page
@@ -158,12 +160,28 @@ def test_the_acceptance_letter_links_the_same_terms_release():
     assert OVERLAY.terms_digest() in letter
     assert OVERLAY.covered_income_text() in letter
     assert "owed to Prezenti and to nobody else" in letter
+    assert "Monthly receipts" in letter
     assert "One monthly public update" in letter
     assert "30 days without" in letter
     assert "7 days to provide evidence" in letter
     assert "months three and four requires" in letter
     assert "No 0xSplits collector" in letter
     assert "GitHub handle" in letter
+
+
+def test_public_backing_copy_uses_the_separate_consent_rule():
+    from talent_engine.modes.acceptance import acceptance_letter
+
+    letter = acceptance_letter("amara", OVERLAY)
+    current = "\n".join(p.read_text() for p in PROSE if p.exists()) + "\n" + letter
+    assert "with the evidence" not in current
+    assert "separate consent" in current
+
+
+def test_no_current_surface_adds_a_token_or_other_structure_obligation():
+    current = "\n".join(p.read_text() for p in PROSE if p.exists())
+    assert "creates value through another structure" not in current
+    assert "same 2% commitment" not in current
 
 
 def test_months_funded_is_not_selected_at_acceptance_anywhere_here():
@@ -181,5 +199,7 @@ def test_fresh_clone_docs_do_not_advertise_a_missing_console_script():
     for text in texts:
         assert not re.search(r"(?m)^talent-engine\s+", text)
     joined = "\n".join(texts)
+    assert "python3 -m compileall -q talent_engine tests" in joined
+    assert "python3 -m pip install pytest" in joined
     assert "python3 -m talent_engine.cli score" in joined
     assert "python3 -m talent_engine.cli serve" in joined

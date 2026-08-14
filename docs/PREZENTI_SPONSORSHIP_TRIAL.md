@@ -97,10 +97,8 @@ recipient, who has no agreement with the Fund.
 
 No 0xSplits collector is deployed for this trial. A collector receiving the full
 2% levy would need to route 100% of its balance to Prezenti, adding a second
-policy surface without changing the builder's obligation. If the project later
-launches a token or creates value through another structure, the recipient will
-publicly document how they intend to honour the same 2% commitment. The pledge
-is not equity, a token warrant or an investment agreement.
+policy surface without changing the builder's obligation. The pledge is not
+equity, a token warrant or an investment agreement.
 
 Acceptance requires a public Celo EAS attestation signed by the builder's wallet
 and naming the builder's GitHub handle. Builders who do not want that public
