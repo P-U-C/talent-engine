@@ -139,6 +139,7 @@ def test_the_generated_landing_page_links_the_canonical_terms_release():
     page = landing_page("P", "formid", None, OVERLAY).decode()
     assert OVERLAY.terms_uri in page
     assert f"terms-version: {OVERLAY.terms_digest()}" in page
+    assert "ChatGPT Pro 5x" in page
     assert "half of what it receives" in page
     assert "1% of covered income" in page
     assert "direct to the verified Prezenti Safe" in page
