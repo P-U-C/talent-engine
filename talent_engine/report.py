@@ -154,7 +154,7 @@ def dossier(
     add(
         "The rubric, the weights, and the scorer are public. Re-running the same "
         "snapshot through the same weights reproduces this number exactly; "
-        "`talent-engine verify` does it for you."
+        "`python3 -m talent_engine.cli verify` does it for you."
     )
     return "\n".join(lines)
 

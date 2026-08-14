@@ -96,7 +96,7 @@ def _policy_dict():
     }
 
 
-# --------------------------------------------------------------- terms v2
+# --------------------------------------------------------------- terms v3
 #
 # The terms are enforced here rather than described in a document, for the
 # same reason every other invariant in this repo is: a policy that lives only
@@ -136,7 +136,7 @@ def _overlay(**giveback_overrides):
             "term_end": "2026-12-29",
             "terms_release": {
                 "version": "test-terms",
-                "document": "docs/terms/prezenti-sponsorship-trial-2026-08-13-v2.md",
+                "document": "docs/terms/prezenti-sponsorship-trial-2026-08-14-v3.md",
             },
             "payment": {
                 "method": "direct_to_prezenti_safe",
@@ -257,9 +257,22 @@ def test_the_terms_release_drives_both_form_marker_and_pledge_hash():
     assert o.terms_hash().startswith("0x")
     assert len(o.terms_hash()) == 66
     assert o.terms_digest() == o.terms_hash()[2:14]
-    assert o.terms_release["document"] == "docs/terms/prezenti-sponsorship-trial-2026-08-13-v2.md"
+    assert o.terms_release["document"] == "docs/terms/prezenti-sponsorship-trial-2026-08-14-v3.md"
     assert o.public_attestation_required is True
     assert o.payment["method"] == "direct_to_prezenti_safe"
+
+
+def test_monitoring_and_selection_are_in_the_terms_digest():
+    data = _policy_dict()
+    old = ProgramOverlay.from_dict(copy.deepcopy(data)).terms_digest()
+
+    changed = copy.deepcopy(data)
+    changed["monitoring"]["cure_days"] = 14
+    assert ProgramOverlay.from_dict(changed).terms_digest() != old
+
+    changed = copy.deepcopy(data)
+    changed["selection"]["shortlist_multiplier"] = 4
+    assert ProgramOverlay.from_dict(changed).terms_digest() != old
 
 
 def test_the_tracker_calendar_is_policy_state():

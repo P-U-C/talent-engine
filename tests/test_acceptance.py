@@ -48,12 +48,23 @@ def test_the_letter_carries_the_bounds_not_just_the_ask(overlay):
     assert "Capped at $14,000" in letter
     assert "expires 36 months" in letter
     assert "pro-rated" in letter
+    assert overlay.covered_income_text() in letter
     assert "owed to Prezenti and to nobody else" in letter
     assert "half of what it receives" in letter
     assert "1% of covered income" in letter
+    assert "One monthly public update" in letter
+    assert "30 days without" in letter
+    assert "7 days to provide evidence" in letter
+    assert "month-two checkpoint" in letter
     assert "No 0xSplits collector" in letter
     assert "GitHub handle" in letter
     assert overlay.terms_digest() in letter
+
+
+def test_the_letter_names_the_approved_benefits(overlay):
+    letter = acceptance_letter("amara-dev", overlay)
+    assert "claude max 20x" in letter
+    assert "chatgpt pro 5x" in letter
 
 
 def test_the_letter_says_what_the_programme_owes(overlay):
@@ -140,18 +151,18 @@ def test_accept_candidate_requires_artifacts_before_any_write(tmp_path):
     store.close()
 
 
-def test_cli_validates_uid_before_recording_acceptance(tmp_path, monkeypatch):
-    """A bad UID must not leave a false accepted decision behind."""
+def test_cli_override_cannot_bypass_legal_clearance(tmp_path, monkeypatch):
+    """Candidate exceptions must not turn uncleared terms into cleared terms."""
     db = tmp_path / "t.db"
+    overlay = load_overlay("prezenti-sponsorship-trial")
     store = Store(db)
     store.select_cohort("prezenti-sponsorship-trial", ["amara-dev"], baseline_run_id="run_x")
     store.close()
 
-    def reject(*args, **kwargs):
-        raise attestations.AttestationValidationError("bad uid")
+    def should_not_validate(*args, **kwargs):  # pragma: no cover - failure path
+        raise AssertionError("attestation validation should not run before legal clearance")
 
-    monkeypatch.setattr(attestations, "validate_attestation_uid", reject)
-    overlay = load_overlay("prezenti-sponsorship-trial")
+    monkeypatch.setattr(attestations, "validate_attestation_uid", should_not_validate)
     rc = cmd_accept(
         Namespace(
             db=str(db),
@@ -178,7 +189,53 @@ def test_cli_validates_uid_before_recording_acceptance(tmp_path, monkeypatch):
     store.close()
 
 
-def test_closeout_records_replacement_and_revocation_events(tmp_path):
+def test_cli_validates_uid_before_recording_acceptance(tmp_path, monkeypatch):
+    """A bad UID must not leave a false accepted decision behind."""
+    db = tmp_path / "t.db"
+    overlay = load_overlay("prezenti-sponsorship-trial")
+    store = Store(db)
+    store.select_cohort("prezenti-sponsorship-trial", ["amara-dev"], baseline_run_id="run_x")
+    store.record_program_clearance(
+        "prezenti-sponsorship-trial",
+        "legal",
+        overlay.terms_digest(),
+        overlay.terms_hash(),
+        "counsel",
+        "test clearance",
+    )
+    store.close()
+
+    def reject(*args, **kwargs):
+        raise attestations.AttestationValidationError("bad uid")
+
+    monkeypatch.setattr(attestations, "validate_attestation_uid", reject)
+    rc = cmd_accept(
+        Namespace(
+            db=str(db),
+            program="prezenti-sponsorship-trial",
+            handle="amara-dev",
+            overlay=None,
+            payment_address=overlay.attestation["recipient"],
+            split_address=None,
+            attestation_uid="0x" + "ab" * 32,
+            attestation_signer="0x1111111111111111111111111111111111111111",
+            attestation_rpc="http://unused.invalid",
+            baseline=None,
+            select=False,
+            override=True,
+            steward="zoz",
+            reason="test override",
+        )
+    )
+    assert rc == 2
+    store = Store(db)
+    assert store.decisions("prezenti-sponsorship-trial") == []
+    assert store.overrides("prezenti-sponsorship-trial", "amara-dev") == []
+    assert store.cohort("prezenti-sponsorship-trial")[0]["accepted_at"] == ""
+    store.close()
+
+
+def test_closeout_records_replacement_and_revocation_as_idempotent_transitions(tmp_path):
     store = Store(tmp_path / "t.db")
     store.select_cohort("p", ["amara-dev"], baseline_run_id="run_x")
     store.record_acceptance(
@@ -188,7 +245,7 @@ def test_closeout_records_replacement_and_revocation_events(tmp_path):
         attestation_uid="0xorig",
         attestation_signer="0xsigner",
     )
-    store.record_closeout(
+    event_id, created = store.record_closeout_replacement(
         "p",
         "amara-dev",
         owner="operator",
@@ -196,14 +253,80 @@ def test_closeout_records_replacement_and_revocation_events(tmp_path):
         replacement_uid="0xreplacement",
         original_uid="0xorig",
         signer="0xsigner",
+    )
+    assert created is True
+    assert store.record_closeout_replacement(
+        "p",
+        "amara-dev",
+        owner="operator",
+        months_funded=2,
+        replacement_uid="0xreplacement",
+        original_uid="0xorig",
+        signer="0xsigner",
+    ) == (event_id, False)
+    with pytest.raises(ValueError, match="different details"):
+        store.record_closeout_replacement(
+            "p",
+            "amara-dev",
+            owner="operator",
+            months_funded=3,
+            replacement_uid="0xreplacement2",
+            original_uid="0xorig",
+            signer="0xsigner",
+        )
+
+    revoke_id, created = store.record_closeout_revocation(
+        "p",
+        "amara-dev",
+        owner="operator",
+        original_uid="0xorig",
+        replacement_uid="0xreplacement",
+        signer="0xsigner",
         revocation_tx="0xtx",
     )
+    assert created is True
+    assert store.record_closeout_revocation(
+        "p",
+        "amara-dev",
+        owner="operator",
+        original_uid="0xorig",
+        replacement_uid="0xreplacement",
+        signer="0xsigner",
+        revocation_tx="0xtx",
+    ) == (revoke_id, False)
+    with pytest.raises(ValueError, match="different tx"):
+        store.record_closeout_revocation(
+            "p",
+            "amara-dev",
+            owner="operator",
+            original_uid="0xorig",
+            replacement_uid="0xreplacement",
+            signer="0xsigner",
+            revocation_tx="0xother",
+        )
+
     events = store.attestation_events("p", "amara-dev")
     assert [e["event_type"] for e in events] == ["replacement", "revocation"]
     assert events[0]["previous_uid"] == "0xorig"
     assert events[0]["months_funded"] == 2
     assert events[1]["uid"] == "0xorig"
+    assert events[1]["previous_uid"] == "0xreplacement"
     assert store.cohort("p")[0]["months_received"] == 2
+    store.close()
+
+
+def test_revocation_requires_a_recorded_replacement(tmp_path):
+    store = Store(tmp_path / "t.db")
+    with pytest.raises(ValueError, match="replacement before revocation"):
+        store.record_closeout_revocation(
+            "p",
+            "amara-dev",
+            owner="operator",
+            original_uid="0xorig",
+            replacement_uid="0xreplacement",
+            signer="0xsigner",
+            revocation_tx="0xtx",
+        )
     store.close()
 
 

@@ -73,7 +73,7 @@ def test_feedback_never_blames_someone_for_who_they_know(cfg):
 def test_the_letter_is_specific_and_reproducible(cfg):
     letter = feedback_letter("tobi-k", score_snapshot(quiet_finisher(), cfg), cfg)
     assert "out of 100" in letter
-    assert "talent-engine score" in letter          # they can recompute it
+    assert "python3 -m talent_engine.cli score" in letter  # they can recompute it
     assert "A score never decided this" in letter   # and it did not decide it
     assert "tell us where" in letter                # the rubric improves this way
 

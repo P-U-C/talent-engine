@@ -342,7 +342,7 @@ forbids an automated signal from making a funding decision.
 
 - **Arrival order.** The check runs when someone applies, so only the person
   who completes a cluster gets the note; earlier members' stored caveats are
-  not retroactively updated. `talent-engine rings` is the canonical view and
+  not retroactively updated. `python3 -m talent_engine.cli rings` is the canonical view and
   should be run before any selection meeting.
 - A ring whose members have **not applied** is invisible: this reads the pool.
 

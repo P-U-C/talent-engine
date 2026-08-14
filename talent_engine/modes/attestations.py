@@ -237,8 +237,7 @@ def _eth_call(rpc_url: str, to: str, data: str) -> str:
 
 
 def _covered_income(overlay: ProgramOverlay) -> str:
-    g = overlay.giveback
-    return f"{g.get('onchain_base')}, and any {g.get('also_applies_to')}."
+    return overlay.covered_income_text()
 
 
 def _normalise_uid(uid: str) -> str:

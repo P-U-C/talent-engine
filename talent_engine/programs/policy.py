@@ -298,18 +298,29 @@ class ProgramOverlay:
                 "release": {
                     "version": self.terms_release.get("version"),
                     "document": str(self.terms_release.get("document")),
+                    "uri": self.terms_release.get("uri", ""),
                     "hash_algorithm": "sha256",
                 },
                 "document_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "scoring_program": self.scoring_program,
+                "status": self.status,
+                "applications_close": self.applications_close,
+                "seats": self.seats,
+                "budget_usd": self.budget_usd,
+                "duration_months": self.duration_months,
+                "benefits": [b.__dict__ for b in self.benefits],
+                "selection": self.selection,
+                "monitoring": self.monitoring,
                 "giveback": self.giveback,
                 "payment": self.payment,
+                "attestation": self.attestation,
                 "public_attestation_required": self.public_attestation_required,
+                "operating_owner": self.operating_owner,
                 "upside": self.upside,
                 "commitments_to_recipient": self.commitments_to_recipient,
                 "term_start": self.term_start,
                 "term_end": self.term_end,
-                "duration_months": self.duration_months,
-                "benefits": [b.__dict__ for b in self.benefits],
+                "kpis": self.kpis,
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -334,6 +345,13 @@ class ProgramOverlay:
         expires = _add_months(end, int(self.giveback.get("sunset_months_after_term", 0)))
         return int(datetime(expires.year, expires.month, expires.day, tzinfo=timezone.utc).timestamp())
 
+    def covered_income_text(self) -> str:
+        """The exact covered-income wording used across terms, form and pledge."""
+        return (
+            f"{self.giveback.get('onchain_base')}, and any "
+            f"{self.giveback.get('also_applies_to')}."
+        )
+
     def terms_summary(self) -> list[str]:
         """The terms in one place, for logs and for the public page.
 
@@ -344,10 +362,13 @@ class ProgramOverlay:
         lines = [
             f"{self.seats} places, {self.duration_months} months, "
             f"${self.per_person_usd:,.0f} each (${self.total_budget_usd:,.0f} total)",
-            f"give-back {g.get('total_bps', 0) / 100:.0f}% of Celo revenue and "
-            f"grant income, capped at ${self.giveback_cap_usd:,.0f}, expiring "
+            f"give-back {g.get('total_bps', 0) / 100:.0f}% of {self.covered_income_text()} "
+            f"Capped at ${self.giveback_cap_usd:,.0f}, expiring "
             f"{g.get('sunset_months_after_term')} months after the term, "
             "pro-rated by months received",
+            f"monthly public updates; {self.monitoring.get('inactivity_review_days')} days inactive "
+            f"triggers review with a {self.monitoring.get('cure_days')}-day cure period",
+            "continued months three and four require a month-two Celo deployment, integration or material contribution",
             f"equity taken: {'yes' if self.upside.get('equity_taken') else 'none'}"
             + (
                 "; right of first offer on a future round"

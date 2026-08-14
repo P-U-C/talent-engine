@@ -4,7 +4,9 @@ Not legal advice. Most of what was listed here was a drafting problem rather
 than a legal one, and drafting problems are fixable without counsel. Those are
 now closed in `SPONSORSHIP_TERMS.md` and recorded below so the reasoning is
 visible. What remains genuinely needs a lawyer, and needs one before the first
-acceptance rather than before publication.
+acceptance rather than before publication. Acceptance is now blocked in code
+until `python3 -m talent_engine.cli legal-clearance` records counsel clearance
+for the exact current terms digest and hash.
 
 ---
 

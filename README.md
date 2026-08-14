@@ -24,7 +24,7 @@ building alone.
 | | |
 |---|---|
 | Claude Max 20x | $200/month × 4 |
-| ChatGPT Pro | $100/month × 4 |
+| ChatGPT Pro 5x | $100/month × 4 |
 | Flexible allowance | $200 one-off |
 
 We are looking for people building **agent infrastructure, protocol
@@ -36,10 +36,10 @@ the ecosystem we are trying to bring people into.
 
 ### What we ask in return
 
-A good-faith pledge of **2% of revenue** to Prezenti, and to nobody else,
-covering revenue the sponsored project receives through Celo and any grant or
-prize income you win with the sponsored work. Prezenti separately routes half
-of what it receives onward to the Celo Community Fund, equivalent to 1% of
+A good-faith pledge of **2%** to Prezenti, and to nobody else, covering revenue
+actually received by the product through Celo, and any grant, prize and
+retro-funding income won with the sponsored work. Prezenti separately routes
+half of what it receives onward to the Celo Community Fund, equivalent to 1% of
 covered income. Bounded in every direction:
 
 - **Capped at $14,000** — ten times the sponsorship. It cannot exceed that.
@@ -50,9 +50,17 @@ covered income. Bounded in every direction:
   right to be *offered* participation, with 14 days' notice. Never an
   obligation on you.
 
+Continuing support also requires monthly receipts, one monthly public update,
+and qualifying activity. Thirty days without qualifying activity triggers
+review; you then have seven days to provide evidence or cure it. Months three
+and four require a verifiable Celo deployment, integration or material ecosystem
+contribution by the month-two checkpoint.
+
 Enforcement is reputational. The pledge is recorded publicly as an on-chain
-attestation, and we are straight about what that means: it is a promise, not a
-security interest, and nothing here gives us a claim on your company.
+attestation that names your GitHub handle, and we are straight about what that
+means: it is a promise, not a security interest, and nothing here gives us a
+claim on your company. Acceptance is blocked until counsel clears the exact
+current terms digest.
 
 ### What the programme owes you
 
@@ -217,7 +225,7 @@ configuration lives here.
 | [RUBRIC.md](RUBRIC.md) | the complete scoring model |
 | [docs/STRATEGY.md](docs/STRATEGY.md) | why these signals, and what an adversary can do to them |
 | [docs/SPONSORSHIP_TERMS.md](docs/SPONSORSHIP_TERMS.md) | current terms index |
-| [docs/terms/prezenti-sponsorship-trial-2026-08-13-v2.md](docs/terms/prezenti-sponsorship-trial-2026-08-13-v2.md) | canonical terms release agreed by applicants |
+| [docs/terms/prezenti-sponsorship-trial-2026-08-14-v3.md](docs/terms/prezenti-sponsorship-trial-2026-08-14-v3.md) | canonical terms release agreed by applicants |
 | [docs/PREZENTI_SPONSORSHIP_TRIAL.md](docs/PREZENTI_SPONSORSHIP_TRIAL.md) | the trial in full |
 | [docs/PROGRAM_LAYER.md](docs/PROGRAM_LAYER.md) | how programmes sit above the score |
 | [docs/ENGINE.md](docs/ENGINE.md) | the engine's own README |
