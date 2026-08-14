@@ -56,7 +56,8 @@ funding decision. Prezenti will shortlist approximately fifteen applicants for:
 3. review of a credible four-month build plan with a Celo deployment,
    integration or material ecosystem contribution;
 4. review of authenticity flags and relationships between applicant accounts;
-5. conflicts review and final steward judgment.
+5. conflicts review and final steward judgment; and
+6. programme-level counsel clearance for the exact current terms digest.
 
 Celo regional scouts will proactively refer builders from their communities.
 An endorsement is sourcing and review context rather than technical points
@@ -86,8 +87,9 @@ dossiers and decision rationales will be published with recipient consent.
 Each recipient makes a public 2% good-faith give-back pledge covering the
 applicant-controlled product identified in the sponsored build plan.
 
-Where that product generates on-chain revenue through Celo, 2% of revenue
-actually received is owed **to Prezenti and to nobody else**, paid directly to
+The pledge covers revenue actually received by the product through Celo, and
+any grant, prize and retro-funding income won with the sponsored work. 2% of
+that covered income is owed **to Prezenti and to nobody else**, paid directly to
 the verified Prezenti Safe. Prezenti separately and publicly commits to routing
 half of what it receives onward to the Celo Community Fund, equivalent to 1% of
 covered income; that is Prezenti's commitment, not an obligation of the

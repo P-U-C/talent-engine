@@ -146,6 +146,20 @@ CREATE TABLE IF NOT EXISTS gate_overrides (
 );
 CREATE INDEX IF NOT EXISTS idx_overrides_handle ON gate_overrides(program, handle);
 
+-- Programme-level clearances. Legal clearance is tied to the exact terms digest
+-- and hash; candidate-level overrides must never bypass it.
+CREATE TABLE IF NOT EXISTS program_clearances (
+    program TEXT NOT NULL,
+    clearance_type TEXT NOT NULL,
+    terms_digest TEXT NOT NULL,
+    terms_hash TEXT NOT NULL,
+    steward TEXT NOT NULL,
+    note TEXT DEFAULT '',
+    cleared_at TEXT NOT NULL,
+    PRIMARY KEY (program, clearance_type, terms_digest)
+);
+CREATE INDEX IF NOT EXISTS idx_program_clearances ON program_clearances(program, clearance_type);
+
 -- Smoke tests, known bad rows, and other records that must not enter selection
 -- or reporting. Kept by handle because selection allocates funded seats by
 -- handle, and a smoke-test handle must fail closed everywhere.
@@ -532,6 +546,54 @@ class Store:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def record_program_clearance(
+        self,
+        program: str,
+        clearance_type: str,
+        terms_digest: str,
+        terms_hash: str,
+        steward: str,
+        note: str = "",
+    ) -> None:
+        if not steward:
+            raise ValueError("clearance requires a named steward")
+        self.conn.execute(
+            "INSERT INTO program_clearances (program, clearance_type, terms_digest, "
+            "terms_hash, steward, note, cleared_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(program, clearance_type, terms_digest) DO UPDATE SET "
+            "terms_hash = excluded.terms_hash, steward = excluded.steward, "
+            "note = excluded.note, cleared_at = excluded.cleared_at",
+            (
+                program,
+                clearance_type,
+                terms_digest,
+                terms_hash,
+                steward,
+                note,
+                utc_now_iso(),
+            ),
+        )
+        self.conn.commit()
+
+    def program_clearance(
+        self,
+        program: str,
+        clearance_type: str,
+        terms_digest: str,
+        terms_hash: str = "",
+    ) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM program_clearances WHERE program = ? AND clearance_type = ? "
+            "AND terms_digest = ?",
+            (program, clearance_type, terms_digest),
+        ).fetchone()
+        if not row:
+            return None
+        out = dict(row)
+        if terms_hash and out.get("terms_hash", "").lower() != terms_hash.lower():
+            return None
+        return out
+
     def quarantine_applicant(self, program: str, handle: str, reason: str) -> None:
         self.conn.execute(
             "INSERT OR REPLACE INTO applicant_quarantine (program, handle, reason, "
@@ -567,9 +629,9 @@ class Store:
         tx_hash: str = "",
         note: str = "",
     ) -> str:
-        event_id = f"{program}:{handle}:{event_type}:{uid}:{utc_now_iso()}"
+        event_id = f"{program}:{handle}:{event_type}:{uid}:{previous_uid or '-'}"
         self.conn.execute(
-            "INSERT INTO attestation_events (event_id, program, handle, event_type, uid, "
+            "INSERT OR IGNORE INTO attestation_events (event_id, program, handle, event_type, uid, "
             "previous_uid, signer, months_funded, tx_hash, note, recorded_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
@@ -625,7 +687,7 @@ class Store:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def record_closeout(
+    def record_closeout_replacement(
         self,
         program: str,
         handle: str,
@@ -635,13 +697,28 @@ class Store:
         replacement_uid: str,
         original_uid: str,
         signer: str,
-        revocation_tx: str = "",
         note: str = "",
-    ) -> None:
+    ) -> tuple[str, bool]:
+        """Record the replacement UID once. Returns (event_id, created)."""
         if not owner:
             raise ValueError("close-out needs an owner")
         if months_funded < 0:
             raise ValueError("months_funded cannot be negative")
+        existing = self.conn.execute(
+            "SELECT * FROM attestation_events WHERE program = ? AND handle = ? "
+            "AND event_type = 'replacement' AND previous_uid = ? ORDER BY recorded_at LIMIT 1",
+            (program, handle, original_uid),
+        ).fetchone()
+        if existing:
+            row = dict(existing)
+            if (
+                row.get("uid") != replacement_uid
+                or int(row.get("months_funded") or 0) != months_funded
+                or (signer and row.get("signer") and row.get("signer") != signer)
+            ):
+                raise ValueError("close-out replacement already recorded with different details")
+            return row["event_id"], False
+
         now = utc_now_iso()
         with self.conn:
             self.conn.execute(
@@ -649,11 +726,11 @@ class Store:
                 (months_funded, program, handle),
             )
             self.conn.execute(
-                "INSERT INTO operating_ledger (entry_id, program, handle, entry_type, period, "
-                "amount_usd, owner, reference, note, recorded_at) "
+                "INSERT OR IGNORE INTO operating_ledger (entry_id, program, handle, "
+                "entry_type, period, amount_usd, owner, reference, note, recorded_at) "
                 "VALUES (?, ?, ?, 'months_funded', '', NULL, ?, ?, ?, ?)",
                 (
-                    f"{program}:months_funded:{handle}:-:{now}",
+                    f"{program}:months_funded:{handle}:{original_uid}",
                     program,
                     handle,
                     owner,
@@ -662,7 +739,7 @@ class Store:
                     now,
                 ),
             )
-            self._record_attestation_event_uncommitted(
+            event_id = self._record_attestation_event_uncommitted(
                 program,
                 handle,
                 "replacement",
@@ -672,18 +749,62 @@ class Store:
                 months_funded=months_funded,
                 note=note or "builder-signed close-out replacement",
             )
-            if revocation_tx:
-                self._record_attestation_event_uncommitted(
-                    program,
-                    handle,
-                    "revocation",
-                    original_uid,
-                    previous_uid=replacement_uid,
-                    signer=signer,
-                    months_funded=months_funded,
-                    tx_hash=revocation_tx,
-                    note="builder revoked superseded attestation",
-                )
+        return event_id, True
+
+    def closeout_replacement_for(
+        self, program: str, handle: str, original_uid: str
+    ) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM attestation_events WHERE program = ? AND handle = ? "
+            "AND event_type = 'replacement' AND previous_uid = ? ORDER BY recorded_at LIMIT 1",
+            (program, handle, original_uid),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def record_closeout_revocation(
+        self,
+        program: str,
+        handle: str,
+        *,
+        owner: str,
+        original_uid: str,
+        replacement_uid: str,
+        signer: str,
+        revocation_tx: str,
+        months_funded: int | None = None,
+        note: str = "",
+    ) -> tuple[str, bool]:
+        """Record original UID revocation once. Returns (event_id, created)."""
+        if not owner:
+            raise ValueError("close-out needs an owner")
+        if not revocation_tx:
+            raise ValueError("revocation transaction is required")
+        replacement = self.closeout_replacement_for(program, handle, original_uid)
+        if not replacement or replacement.get("uid") != replacement_uid:
+            raise ValueError("record the matching close-out replacement before revocation")
+        existing = self.conn.execute(
+            "SELECT * FROM attestation_events WHERE program = ? AND handle = ? "
+            "AND event_type = 'revocation' AND uid = ? ORDER BY recorded_at LIMIT 1",
+            (program, handle, original_uid),
+        ).fetchone()
+        if existing:
+            row = dict(existing)
+            if row.get("tx_hash") != revocation_tx:
+                raise ValueError("close-out revocation already recorded with a different tx")
+            return row["event_id"], False
+        with self.conn:
+            event_id = self._record_attestation_event_uncommitted(
+                program,
+                handle,
+                "revocation",
+                original_uid,
+                previous_uid=replacement_uid,
+                signer=signer,
+                months_funded=months_funded,
+                tx_hash=revocation_tx,
+                note=note or "builder revoked superseded attestation",
+            )
+        return event_id, True
 
     # ------------------------------------------------------------ submissions
 

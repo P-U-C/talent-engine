@@ -131,7 +131,7 @@ def feedback_letter(
         "this number yourself:"
     )
     add("  git clone https://github.com/P-U-C/talent-engine")
-    add(f"  talent-engine score --program {cfg.key} --handles {handle}")
+    add(f"  python3 -m talent_engine.cli score --program {cfg.key} --handles {handle}")
     add("")
     add(
         "If you think it is wrong, tell us where — that is the point of "

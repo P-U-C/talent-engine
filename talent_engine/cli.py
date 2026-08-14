@@ -1,13 +1,13 @@
 """Command line interface.
 
-    talent-engine score   --program celo-trial --handles a,b,c
-    talent-engine score   --program celo-trial --csv applications.csv
-    talent-engine scout   --program celo-trial --seeds celo-org/celo-composer
-    talent-engine monitor --program celo-trial
-    talent-engine measure --program celo-trial --baseline run_x --endline run_y
-    talent-engine verify  --run run_x --handle octocat
-    talent-engine dossier --run run_x --handle octocat
-    talent-engine runs    --program celo-trial
+    python3 -m talent_engine.cli score   --program celo-trial --handles a,b,c
+    python3 -m talent_engine.cli score   --program celo-trial --csv applications.csv
+    python3 -m talent_engine.cli scout   --program celo-trial --seeds celo-org/celo-composer
+    python3 -m talent_engine.cli monitor --program celo-trial
+    python3 -m talent_engine.cli measure --program celo-trial --baseline run_x --endline run_y
+    python3 -m talent_engine.cli verify  --run run_x --handle octocat
+    python3 -m talent_engine.cli dossier --run run_x --handle octocat
+    python3 -m talent_engine.cli runs    --program celo-trial
 """
 
 from __future__ import annotations
@@ -364,7 +364,13 @@ def cmd_gates(args) -> int:
     overlay = load_overlay(args.overlay or args.program)
     store = Store(args.db)
     handle = normalize_handle(args.handle) or args.handle
-    checked = gate_checks.evaluate(store, cfg.key, handle, overlay.terms_digest())
+    checked = gate_checks.evaluate(
+        store,
+        cfg.key,
+        handle,
+        overlay.terms_digest(),
+        overlay.terms_hash(),
+    )
     print(gate_checks.render(checked))
     unmet = gate_checks.failing(checked)
     print(f"\n{len(checked) - len(unmet)}/{len(checked)} gates met.")
@@ -372,6 +378,31 @@ def cmd_gates(args) -> int:
         print(f"  override: {o['gates']} by {o['steward']} — {o['reason']}")
     store.close()
     return 1 if unmet else 0
+
+
+def cmd_legal_clearance(args) -> int:
+    """Record counsel clearance for the exact current terms release."""
+    from .programs.policy import load_overlay
+
+    cfg = load_program(args.program)
+    overlay = load_overlay(args.overlay or args.program)
+    store = Store(args.db)
+    digest = overlay.terms_digest()
+    terms_hash = overlay.terms_hash()
+    store.record_program_clearance(
+        cfg.key,
+        "legal",
+        digest,
+        terms_hash,
+        args.steward,
+        args.note or "",
+    )
+    print(
+        f"legal clearance recorded for {cfg.key}: {digest} "
+        f"({terms_hash}) by {args.steward}"
+    )
+    store.close()
+    return 0
 
 
 def cmd_accept(args) -> int:
@@ -390,18 +421,37 @@ def cmd_accept(args) -> int:
     # Fail closed. `--select` used to be enough to accept an arbitrary handle
     # with no scored application, no recorded terms acceptance and none of the
     # programme's human checks -- and it printed the full acceptance letter.
-    checked = gate_checks.evaluate(store, cfg.key, handle, overlay.terms_digest())
+    checked = gate_checks.evaluate(
+        store,
+        cfg.key,
+        handle,
+        overlay.terms_digest(),
+        overlay.terms_hash(),
+    )
     unmet = gate_checks.failing(checked)
+    hard_unmet = gate_checks.non_bypassable_failures(checked)
+    bypassable_unmet = [g for g in unmet if g.bypassable]
     override_event = None
     if unmet:
         print("--- acceptance gates -------------------------------------------")
         print(gate_checks.render(checked))
+        if hard_unmet:
+            print(
+                f"\n{handle} does not clear {len(hard_unmet)} non-bypassable gate(s), "
+                "so no acceptance was recorded and no letter was produced.\n"
+                "Counsel clearance must be recorded for the exact current terms with:\n"
+                "  python3 -m talent_engine.cli legal-clearance --program <program> "
+                "--steward <who> --note <counsel memo/url>",
+                file=sys.stderr,
+            )
+            store.close()
+            return 2
         if not args.override:
             print(
-                f"\n{handle} does not clear {len(unmet)} gate(s), so no acceptance "
-                "was recorded and no letter was produced.\n"
-                "Record the human checks with `talent-engine signoff`, or, if this "
-                "is a deliberate exception, re-run with:\n"
+                f"\n{handle} does not clear {len(bypassable_unmet)} candidate gate(s), "
+                "so no acceptance was recorded and no letter was produced.\n"
+                "Record the human checks with `python3 -m talent_engine.cli signoff`, "
+                "or, if this is a deliberate candidate exception, re-run with:\n"
                 "  --override --steward <who> --reason <why>\n"
                 "An override is written atomically with acceptance after artefacts validate.",
                 file=sys.stderr,
@@ -416,7 +466,7 @@ def cmd_accept(args) -> int:
             )
             store.close()
             return 2
-        override_event = ([g.key for g in unmet], args.steward, args.reason)
+        override_event = ([g.key for g in bypassable_unmet], args.steward, args.reason)
 
     cohort_exists = any(m["handle"] == handle for m in store.cohort(cfg.key))
     if not cohort_exists and not args.select:
@@ -558,36 +608,38 @@ def cmd_quarantine(args) -> int:
     return 0
 
 
-def cmd_closeout(args) -> int:
-    """Record builder-signed replacement/revocation for a pledge close-out."""
-    from .modes.attestations import (
-        AttestationValidationError,
-        validate_replacement_uid,
-        validate_revoked_uid,
-    )
+def _accepted_attestation_row(store: Store, program: str, handle: str) -> dict:
+    cohort = {m["handle"]: m for m in store.cohort(program)}
+    row = cohort.get(handle)
+    if not row or not row.get("attestation_uid"):
+        raise ValueError(f"{handle} has no original attestation UID recorded")
+    if not row.get("attestation_signer"):
+        raise ValueError(f"{handle} has no accepted attestation signer recorded")
+    return row
+
+
+def cmd_closeout_replace(args) -> int:
+    """Record the builder-signed replacement pledge for close-out."""
+    from .modes.attestations import AttestationValidationError, validate_replacement_uid
     from .programs.policy import load_overlay
 
     cfg = load_program(args.program)
     overlay = load_overlay(args.overlay or args.program)
     store = Store(args.db)
     handle = normalize_handle(args.handle) or args.handle
-    cohort = {m["handle"]: m for m in store.cohort(cfg.key)}
-    row = cohort.get(handle)
-    if not row or not row.get("attestation_uid"):
-        print(f"{handle} has no original attestation UID recorded", file=sys.stderr)
+    try:
+        row = _accepted_attestation_row(store, cfg.key, handle)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
         store.close()
         return 2
-    original_uid = args.original_uid or row["attestation_uid"]
+    original_uid = row["attestation_uid"]
+    signer = row["attestation_signer"]
     if args.months_funded < 0 or args.months_funded > overlay.duration_months:
         print(
             f"--months-funded must be between 0 and {overlay.duration_months}",
             file=sys.stderr,
         )
-        store.close()
-        return 2
-    signer = args.attestation_signer or row.get("attestation_signer") or ""
-    if not signer:
-        print("--attestation-signer is required for close-out validation", file=sys.stderr)
         store.close()
         return 2
     try:
@@ -600,30 +652,77 @@ def cmd_closeout(args) -> int:
             months_funded=args.months_funded,
             rpc_url=args.attestation_rpc,
         )
-        if args.revocation_tx:
-            validate_revoked_uid(original_uid, overlay, rpc_url=args.attestation_rpc)
-    except AttestationValidationError as exc:
-        print(f"close-out rejected: {exc}", file=sys.stderr)
+        event_id, created = store.record_closeout_replacement(
+            cfg.key,
+            handle,
+            owner=args.owner or overlay.operating_owner,
+            months_funded=args.months_funded,
+            replacement_uid=args.replacement_uid,
+            original_uid=original_uid,
+            signer=signer,
+            note=args.note or "",
+        )
+    except (AttestationValidationError, ValueError) as exc:
+        print(f"close-out replacement rejected: {exc}", file=sys.stderr)
         store.close()
         return 2
-    store.record_closeout(
-        cfg.key,
-        handle,
-        owner=args.owner or overlay.operating_owner,
-        months_funded=args.months_funded,
-        replacement_uid=args.replacement_uid,
-        original_uid=original_uid,
-        signer=signer,
-        revocation_tx=args.revocation_tx or "",
-        note=args.note or "",
+    verb = "recorded" if created else "already recorded"
+    print(
+        f"close-out replacement {verb} for {handle}: {args.months_funded} "
+        f"month(s) funded ({event_id})"
     )
-    print(f"recorded close-out for {handle}: {args.months_funded} month(s) funded")
-    if not args.revocation_tx:
+    print(
+        "replacement complete; builder still must revoke the original attestation "
+        "with `python3 -m talent_engine.cli closeout-revoke`",
+        file=sys.stderr,
+    )
+    store.close()
+    return 0
+
+
+def cmd_closeout_revoke(args) -> int:
+    """Record revocation of the accepted original pledge after replacement."""
+    from .modes.attestations import AttestationValidationError, validate_revoked_uid
+    from .programs.policy import load_overlay
+
+    cfg = load_program(args.program)
+    overlay = load_overlay(args.overlay or args.program)
+    store = Store(args.db)
+    handle = normalize_handle(args.handle) or args.handle
+    try:
+        row = _accepted_attestation_row(store, cfg.key, handle)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        store.close()
+        return 2
+    original_uid = row["attestation_uid"]
+    replacement = store.closeout_replacement_for(cfg.key, handle, original_uid)
+    if not replacement:
         print(
-            "replacement recorded; the builder still must revoke the superseded "
-            "attestation and provide --revocation-tx",
+            "record the close-out replacement before recording revocation",
             file=sys.stderr,
         )
+        store.close()
+        return 2
+    try:
+        validate_revoked_uid(original_uid, overlay, rpc_url=args.attestation_rpc)
+        event_id, created = store.record_closeout_revocation(
+            cfg.key,
+            handle,
+            owner=args.owner or overlay.operating_owner,
+            original_uid=original_uid,
+            replacement_uid=replacement["uid"],
+            signer=row["attestation_signer"],
+            revocation_tx=args.revocation_tx,
+            months_funded=replacement.get("months_funded"),
+            note=args.note or "",
+        )
+    except (AttestationValidationError, ValueError) as exc:
+        print(f"close-out revocation rejected: {exc}", file=sys.stderr)
+        store.close()
+        return 2
+    verb = "recorded" if created else "already recorded"
+    print(f"close-out revocation {verb} for {handle}: {event_id}")
     store.close()
     return 0
 
@@ -902,6 +1001,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--overlay", help="policy key, if it differs from --program")
     s.set_defaults(func=cmd_gates)
 
+    s = sub.add_parser(
+        "legal-clearance",
+        help="record counsel clearance for the exact current terms release",
+    )
+    s.add_argument("--program", required=True)
+    s.add_argument("--overlay", help="policy key, if it differs from --program")
+    s.add_argument("--steward", required=True, help="who holds the counsel clearance")
+    s.add_argument("--note", required=True, help="counsel memo, approval id, or URL")
+    s.set_defaults(func=cmd_legal_clearance)
+
     s = sub.add_parser("shortlist", help="rank the whole scored applicant pool deterministically")
     s.add_argument("--program", required=True)
     s.add_argument("--limit", type=int)
@@ -914,19 +1023,32 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--reason", required=True)
     s.set_defaults(func=cmd_quarantine)
 
-    s = sub.add_parser("closeout", help="record builder pledge replacement/revocation")
+    s = sub.add_parser(
+        "closeout-replace",
+        help="record the builder-signed replacement pledge for close-out",
+    )
     s.add_argument("--program", required=True)
     s.add_argument("--handle", required=True)
     s.add_argument("--overlay", help="policy key, if it differs from --program")
     s.add_argument("--months-funded", type=int, required=True)
     s.add_argument("--replacement-uid", required=True)
-    s.add_argument("--original-uid", help="defaults to the cohort acceptance UID")
-    s.add_argument("--attestation-signer", help="builder wallet; defaults to accepted signer")
     s.add_argument("--attestation-rpc", default="https://forno.celo.org")
-    s.add_argument("--revocation-tx", help="transaction where the builder revoked the original UID")
     s.add_argument("--owner", help="operator recording the close-out")
     s.add_argument("--note", default="")
-    s.set_defaults(func=cmd_closeout)
+    s.set_defaults(func=cmd_closeout_replace)
+
+    s = sub.add_parser(
+        "closeout-revoke",
+        help="record revocation of the accepted original pledge",
+    )
+    s.add_argument("--program", required=True)
+    s.add_argument("--handle", required=True)
+    s.add_argument("--overlay", help="policy key, if it differs from --program")
+    s.add_argument("--attestation-rpc", default="https://forno.celo.org")
+    s.add_argument("--revocation-tx", required=True, help="transaction where the builder revoked the original UID")
+    s.add_argument("--owner", help="operator recording the close-out")
+    s.add_argument("--note", default="")
+    s.set_defaults(func=cmd_closeout_revoke)
 
     s = sub.add_parser(
         "rings", help="relationships between applicants (needs a pool, not one profile)"

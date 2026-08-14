@@ -7,7 +7,11 @@ acceptance letter -- with no scored application, no record that the person had
 agreed to the current terms, and none of the human judgements the programme
 says it makes. Nothing failed, because nothing was checked.
 
-Two kinds of gate, and the difference matters.
+There are three kinds of gate, and the difference matters.
+
+**Programme-level.** Whether counsel cleared the exact terms digest and hash.
+This is not a candidate exception; an override for one applicant must never
+turn uncleared terms into cleared terms.
 
 **Machine-checkable.** Whether a scored application exists, and whether the
 applicant affirmatively accepted the terms *at their current version*. The
@@ -19,9 +23,10 @@ answer these and should not pretend to. What it can do is refuse to proceed
 until a named person has recorded that they did, which turns "we always check"
 from a habit into a record.
 
-Failing closed is the point. An override exists because reality has edge
-cases, but it is an event with an author and a reason, written to its own
-table, and the acceptance letter says it happened.
+Failing closed is the point. Candidate-level overrides exist because reality
+has edge cases, but they are events with an author and a reason, written to
+their own table. Programme-level legal clearance is deliberately not
+bypassable from `accept`.
 """
 
 from __future__ import annotations
@@ -29,6 +34,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+PROGRAM_GATES = ("legal_clearance",)
 MACHINE_GATES = ("scored_application", "terms_accepted")
 HUMAN_GATES = (
     "access_barrier_verified",
@@ -36,9 +42,10 @@ HUMAN_GATES = (
     "celo_fit_checked",
     "conflict_cleared",
 )
-ALL_GATES = MACHINE_GATES + HUMAN_GATES
+ALL_GATES = PROGRAM_GATES + MACHINE_GATES + HUMAN_GATES
 
 GATE_LABELS = {
+    "legal_clearance": "counsel cleared the current programme terms",
     "scored_application": "a scored application exists under this programme",
     "terms_accepted": "the applicant accepted the current terms",
     "access_barrier_verified": "the access barrier was verified",
@@ -53,15 +60,32 @@ class Gate:
     key: str
     passed: bool
     detail: str
+    bypassable: bool = True
 
     @property
     def label(self) -> str:
         return GATE_LABELS.get(self.key, self.key)
 
 
-def evaluate(store, program: str, handle: str, terms_digest: str) -> list[Gate]:
+def evaluate(
+    store,
+    program: str,
+    handle: str,
+    terms_digest: str,
+    terms_hash: str = "",
+) -> list[Gate]:
     """Every acceptance gate for one candidate, in the order a human checks them."""
     gates: list[Gate] = []
+
+    clearance = store.program_clearance(program, "legal", terms_digest, terms_hash)
+    if clearance:
+        detail = (
+            f"cleared by {clearance['steward']} on {clearance['cleared_at'][:10]} "
+            f"for {terms_digest}"
+        )
+    else:
+        detail = f"no counsel clearance for terms {terms_digest}"
+    gates.append(Gate("legal_clearance", bool(clearance), detail, bypassable=False))
 
     scored = store.has_scored_application(program, handle)
     gates.append(
@@ -113,9 +137,14 @@ def failing(gates: list[Gate]) -> list[Gate]:
     return [g for g in gates if not g.passed]
 
 
+def non_bypassable_failures(gates: list[Gate]) -> list[Gate]:
+    return [g for g in gates if not g.passed and not g.bypassable]
+
+
 def render(gates: list[Gate]) -> str:
     lines = []
     for g in gates:
         mark = "pass" if g.passed else "FAIL"
-        lines.append(f"  [{mark}] {g.key:26} {g.label} — {g.detail}")
+        hard = " (not overrideable)" if not g.bypassable else ""
+        lines.append(f"  [{mark}] {g.key:26} {g.label}{hard} — {g.detail}")
     return "\n".join(lines)

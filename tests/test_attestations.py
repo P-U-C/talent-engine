@@ -203,8 +203,7 @@ def _encoded_trial_data(
 
 
 def _covered_income(overlay) -> str:
-    g = overlay.giveback
-    return f"{g.get('onchain_base')}, and any {g.get('also_applies_to')}."
+    return overlay.covered_income_text()
 
 
 def _uint(value: int) -> bytes:

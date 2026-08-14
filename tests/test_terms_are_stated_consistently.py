@@ -27,7 +27,7 @@ OVERLAY = load_overlay("prezenti-sponsorship-trial")
 # Every published surface that states the give-back in prose.
 PROSE = [
     ROOT / "docs" / "SPONSORSHIP_TERMS.md",
-    ROOT / "docs" / "terms" / "prezenti-sponsorship-trial-2026-08-13-v2.md",
+    ROOT / "docs" / "terms" / "prezenti-sponsorship-trial-2026-08-14-v3.md",
     ROOT / "docs" / "PREZENTI_SPONSORSHIP_TRIAL.md",
     ROOT / "RUBRIC.md",
     ROOT / "README.md",
@@ -123,8 +123,13 @@ def test_the_form_marker_is_derived_from_the_terms_release():
     assert len(terms) == 1
     option = terms[0]["options"][0]
     assert "[terms-version: {terms_digest}]" in option
-    assert "2% of Celo revenue and grant income" in option
+    assert OVERLAY.covered_income_text() in option
+    assert "Claude Max 20x, ChatGPT Pro 5x" in option
     assert "paid directly to the verified Prezenti Safe" in option
+    assert "monthly public updates" in option
+    assert "30 days inactive" in option
+    assert "7-day cure period" in option
+    assert "month-two Celo deployment" in option
     assert "public Celo EAS pledge" in option
 
 
@@ -137,6 +142,10 @@ def test_the_generated_landing_page_links_the_canonical_terms_release():
     assert "half of what it receives" in page
     assert "1% of covered income" in page
     assert "direct to the verified Prezenti Safe" in page
+    assert "monthly public updates" in page
+    assert "30 days inactive" in page
+    assert "7-day cure period" in page
+    assert "month-two Celo deployment" in page
     assert "public Celo EAS pledge" in page
 
 
@@ -146,7 +155,12 @@ def test_the_acceptance_letter_links_the_same_terms_release():
     letter = acceptance_letter("amara", OVERLAY)
     assert OVERLAY.terms_uri in letter
     assert OVERLAY.terms_digest() in letter
+    assert OVERLAY.covered_income_text() in letter
     assert "owed to Prezenti and to nobody else" in letter
+    assert "One monthly public update" in letter
+    assert "30 days without" in letter
+    assert "7 days to provide evidence" in letter
+    assert "months three and four requires" in letter
     assert "No 0xSplits collector" in letter
     assert "GitHub handle" in letter
 
@@ -155,3 +169,16 @@ def test_months_funded_is_not_selected_at_acceptance_anywhere_here():
     for path in PROSE + [ROOT / "forms" / "sponsorship-application.json"]:
         assert "monthsFundedAtSigning" not in path.read_text()
         assert "Months funded at signing" not in path.read_text()
+
+
+def test_fresh_clone_docs_do_not_advertise_a_missing_console_script():
+    paths = [ROOT / "README.md"]
+    engine_doc = ROOT / "docs" / "ENGINE.md"
+    if engine_doc.exists():
+        paths.append(engine_doc)
+    texts = [p.read_text() for p in paths]
+    for text in texts:
+        assert not re.search(r"(?m)^talent-engine\s+", text)
+    joined = "\n".join(texts)
+    assert "python3 -m talent_engine.cli score" in joined
+    assert "python3 -m talent_engine.cli serve" in joined

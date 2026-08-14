@@ -110,10 +110,9 @@ def acceptance_letter(
 
     add("What we ask in return:")
     add(
-        f"  · {g.get('total_bps', 0) / 100:.0f}% of revenue your sponsored project "
-        "receives through Celo, and of any grant or prize income you win with"
+        f"  · {g.get('total_bps', 0) / 100:.0f}% of {overlay.covered_income_text()} "
+        "This is owed to Prezenti and to nobody else."
     )
-    add("    this work, owed to Prezenti and to nobody else.")
     onward = g.get("prezenti_onward_commitment") or {}
     if onward:
         add(
@@ -127,11 +126,21 @@ def acceptance_letter(
         "programme ends."
     )
     add(
-        "  · It is pro-rated by the months you actually take. Leave at the "
-        f"month-{overlay.monitoring.get('inactivity_review_days', 30) // 30 + 1} "
-        "point and you owe proportionally less."
+        "  · It is pro-rated by the months you actually take. Leave early and "
+        "you owe proportionally less."
     )
-    add("  · A monthly public update on what you are building.")
+    add("  · One monthly public update on what you are building.")
+    add(
+        f"  · {overlay.monitoring.get('inactivity_review_days')} days without "
+        f"qualifying activity triggers review; you then have "
+        f"{overlay.monitoring.get('cure_days')} days to provide evidence or cure it."
+    )
+    if overlay.monitoring.get("month_two_celo_gate"):
+        add(
+            "  · Continued support for months three and four requires a verifiable "
+            "Celo deployment, integration or material ecosystem contribution by "
+            "the month-two checkpoint."
+        )
     add("")
     add(
         "  This is a good-faith pledge, and we want to be straight with you about "

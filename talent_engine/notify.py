@@ -138,7 +138,7 @@ def notify(subject: str, body: str, telegram_body: str | None = None) -> bool:
     if not disabled():
         log.error(
             "NOTIFICATION LOST: every channel failed for %r. Nobody has been told; "
-            "recover it with `talent-engine submissions`.",
+            "recover it with `python3 -m talent_engine.cli submissions`.",
             subject,
         )
     return False
@@ -195,7 +195,7 @@ def application_scored(
 
     # Telegram: no contact details, they stay on the box.
     telegram_body = "\n".join(
-        head + ["Contact details: talent-engine submissions --with-contact"]
+        head + ["Contact details: python3 -m talent_engine.cli submissions --with-contact"]
     )
 
     # Email: the operator cannot run that command, and the form platform
