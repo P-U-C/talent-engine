@@ -17,7 +17,7 @@ which is the general engine. This fork is Prezenti's live deployment of it.
 
 ## The programme
 
-A trial: **5 places, 4 months, $7,000 total.** Applications close **2026-08-25**.
+A trial: **5 places, 4 months, $7,000 total.** Applications close when the fifth place is filled, or **2026-12-29**, whichever comes first.
 Each place is $1,400 of tooling that removes the main constraint on someone
 building alone.
 
