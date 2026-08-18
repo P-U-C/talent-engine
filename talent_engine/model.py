@@ -298,6 +298,11 @@ class Application:
     referrer_name: str = ""
     declared_repo: str = ""
     build_plan: str = ""  # collected, surfaced to reviewers, unscored by default
+    # Self-declared continent, shown to stewards for programme reach.
+    # Consistent with Invariant 2 because the applicant states it: it is
+    # never inferred from a name, avatar or anything else, and it earns no
+    # points -- reach is a steward judgement, not a score.
+    region: str = ""
     # Did the applicant affirmatively accept the programme terms, and which
     # version. Displaying terms on a page is not agreement; an affirmative act
     # is, and it has to say what was agreed to or it means nothing later.
