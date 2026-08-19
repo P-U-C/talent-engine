@@ -35,9 +35,12 @@ import csv
 import io
 import sqlite3
 
-# UID leads: it is the programme's own reference for an applicant, in the same
-# shape as the identifiers in the Pools CRM, and it is what a steward quotes in
-# an email. Only what the Tally tab does not already hold follows. Continent, submitted-at and
+# Submission ID leads because VLOOKUP matches on the FIRST column of its range
+# and nothing else. Putting UID in front of it silently broke every lookup in
+# the stewards' sheet -- the formula went looking for a submission id in a
+# column of references and matched nothing. The join key comes first; where the
+# UID appears in their sheet is a matter for their own column order.
+# Everything the Tally tab already holds is left out. Continent, submitted-at and
 # the declared repo are all columns over there already, and duplicating them
 # invites the two copies to disagree. Submission ID leads because it is the
 # join key: it appears in column A of the Tally tab, it is exact, and it does
@@ -48,8 +51,8 @@ import sqlite3
 # "Trovic1" and a full github.com URL; matching on what they typed would fail
 # on exactly the rows a steward most wants to look up.
 COLUMNS = [
-    "UID",
     "Submission ID",
+    "UID",
     "Rank",
     "Handle",
     "Score",
@@ -128,8 +131,8 @@ def csv_for(db_path: str) -> str:
         payload = payloads.get(s["handle"], "")
         automated, application = _split(payload) if payload else ("", "")
         w.writerow([
-            s["uid"],
             s["submission_id"],
+            s["uid"],
             rank_of.get(s["handle"], ""),
             s["handle"] or s["raw_handle"],
             f'{s["total"]:.2f}' if s["total"] is not None else "",

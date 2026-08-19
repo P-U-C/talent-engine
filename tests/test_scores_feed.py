@@ -47,7 +47,11 @@ def _seeded(tmp_path):
 
 def test_the_feed_carries_the_score(tmp_path):
     out = scores_feed.csv_for(_seeded(tmp_path))
-    assert out.startswith("UID,Submission ID,Rank,Handle,Score,")
+    assert out.startswith("Submission ID,UID,Rank,Handle,Score,")
+    # VLOOKUP matches the first column of its range and nothing else, so the
+    # join key has to lead. Putting the reference in front of it broke every
+    # lookup in the stewards' sheet.
+    assert out.split(",", 1)[0] == "Submission ID"
     assert "amara-dev" in out
     assert "61.50" in out
     # Submission ID is the join key: it is column A of the tab Tally writes.
