@@ -35,19 +35,25 @@ import csv
 import io
 import sqlite3
 
-# Mirrors the score columns of the Pools CRM sheet the programme already runs
-# on, so the pulled tab lines up with what the stewards read elsewhere.
+# Only what the Tally tab does not already hold. Continent, submitted-at and
+# the declared repo are all columns over there already, and duplicating them
+# invites the two copies to disagree. Submission ID leads because it is the
+# join key: it appears in column A of the Tally tab, it is exact, and it does
+# not depend on the two tabs staying in the same order.
+#
+# Handle is worth carrying even though Tally captured one, because this is the
+# NORMALISED handle the engine actually scored. Applicants typed "Gideonnut",
+# "Trovic1" and a full github.com URL; matching on what they typed would fail
+# on exactly the rows a steward most wants to look up.
 COLUMNS = [
+    "Submission ID",
     "Rank",
     "Handle",
-    "Continent",
     "Score",
     "Automated",
     "Application",
     "Flags",
     "Status",
-    "Applied",
-    "Declared repo",
 ]
 
 STATUS_LABEL = {
@@ -80,13 +86,11 @@ def _split(payload: str) -> tuple[str, str]:
 
 def csv_for(db_path: str) -> str:
     """Every inbound as one row, in arrival order, with no contact detail."""
-    import json
-
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
         subs = conn.execute(
-            "select handle, raw_handle, application_json, received_at, status, total"
+            "select submission_id, handle, raw_handle, received_at, status, total"
             " from submissions"
         ).fetchall()
         # Newest score per handle: a handle can be re-scored, and the sheet
@@ -118,20 +122,14 @@ def csv_for(db_path: str) -> str:
     for s in rows:
         payload = payloads.get(s["handle"], "")
         automated, application = _split(payload) if payload else ("", "")
-        try:
-            app = json.loads(s["application_json"])
-        except (json.JSONDecodeError, TypeError):
-            app = {}
         w.writerow([
+            s["submission_id"],
             rank_of.get(s["handle"], ""),
             s["handle"] or s["raw_handle"],
-            app.get("region", ""),
             f'{s["total"]:.2f}' if s["total"] is not None else "",
             automated,
             application,
             _flag_keys(payload) if payload else "",
             STATUS_LABEL.get(s["status"], s["status"]),
-            (s["received_at"] or "")[:16].replace("T", " "),
-            app.get("declared_repo", ""),
         ])
     return buf.getvalue()
