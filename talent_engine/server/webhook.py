@@ -22,9 +22,12 @@ Security posture:
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
+import os
 import queue
+import sqlite3
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -38,6 +41,7 @@ from ..notify import application_scored
 from ..scoring.concerns import concerns
 from ..scoring.engine import CODE_VERSION, score_snapshot
 from ..store.db import Store
+from . import scores_feed
 
 log = logging.getLogger("talent_engine.intake")
 
@@ -292,6 +296,14 @@ class IntakeService:
 
 
 def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[str, bytes]]):
+    # The stewards' spreadsheet lives inside the Prezenti workspace and cannot
+    # be shared outward, so the scores travel to it instead: a tab running
+    # =IMPORTDATA(<this url>) pulls them on Google's schedule. IMPORTDATA
+    # fetches anonymously, so the token in the path is the only thing between
+    # this and the open web -- unset, the route does not exist at all.
+    feed_token = os.environ.get("SCORES_FEED_TOKEN", "").strip()
+    feed_path = f"/scores/{feed_token}.csv" if feed_token else None
+
     class Handler(BaseHTTPRequestHandler):
         server_version = "talent-engine"
         sys_version = ""
@@ -299,10 +311,17 @@ def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[st
         def log_message(self, fmt: str, *args: Any) -> None:  # route through logging
             log.info("%s %s", self.address_string(), fmt % args)
 
-        def _send(self, code: int, content_type: str, payload: bytes) -> None:
+        def _send(self, code: int, content_type: str, payload: bytes,
+                  no_store: bool = False) -> None:
             self.send_response(code)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(payload)))
+            if no_store:
+                # Cloudflare caches by extension, and it cached a .csv 404 for
+                # four hours the first time this route was requested. A feed a
+                # spreadsheet pulls has to answer with today's scores, not a
+                # copy from lunchtime, so it opts out at the edge explicitly.
+                self.send_header("Cache-Control", "no-store, max-age=0")
             # The page embeds Tally in an iframe and loads nothing else, so the
             # policy can be this tight: no scripts of our own, no other origins.
             self.send_header(
@@ -331,6 +350,15 @@ def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[st
             path = self.path.split("?", 1)[0]
             if path.rstrip("/") in ("/healthz", "/health"):
                 self._plain(200, "ok\n")
+                return
+            if feed_path and hmac.compare_digest(path, feed_path):
+                try:
+                    body = scores_feed.csv_for(service.db_path).encode()
+                except sqlite3.Error:
+                    log.exception("scores feed could not read the database")
+                    self._plain(503, "scores unavailable\n")
+                    return
+                self._send(200, "text/csv; charset=utf-8", body, no_store=True)
                 return
             page = pages.get(path) or (pages.get(path.rstrip("/")) if path != "/" else None)
             if page:
