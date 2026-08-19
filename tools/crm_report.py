@@ -27,6 +27,7 @@ goes to a named steward. The default output is safe to share.
 from __future__ import annotations
 
 import argparse
+import csv
 import html
 import json
 import os
@@ -169,6 +170,47 @@ def render_contact(sub: dict, show: bool) -> str:
     return f'<p class="contact">{" · ".join(bits) or "nothing on file"}</p>'
 
 
+# Column order mirrors the Pools CRM sheet the programme already runs on, so a
+# steward reading both is not re-learning a layout. `Notes` is deliberately left
+# empty: it is the steward's column, and this tool never writes into it.
+CSV_COLUMNS = [
+    "Handle", "Name", "Email", "Telegram", "X", "Continent", "Score",
+    "Automated", "Application", "Flags", "Status", "Applied", "Declared repo",
+    "Decision", "Notes",
+]
+
+
+def csv_rows(data: dict, show_contacts: bool) -> list[list[str]]:
+    out = []
+    order = sorted(
+        data["submissions"],
+        key=lambda s: (s["status"] != "scored", s["total"] is None, -(s["total"] or 0)),
+    )
+    for s in order:
+        c = s["contact"] if show_contacts else {}
+        sc = s["score"] or {}
+        app = s["application"]
+        flags = sc.get("flags") or []
+        out.append([
+            s["handle"] or s["raw_handle"],
+            c.get("name", ""),
+            c.get("email", ""),
+            c.get("telegram", ""),
+            c.get("x", ""),
+            app.get("region", ""),
+            f'{s["total"]:.2f}' if s["total"] is not None else "",
+            f'{float(sc.get("automated_total", 0)):.2f}' if sc else "",
+            f'{float(sc.get("application_total", 0)):.2f}' if sc else "",
+            "; ".join(f.get("key", "").replace("_", " ") for f in flags),
+            STATUS_LABEL.get(s["status"], s["status"]),
+            (s["received_at"] or "")[:16].replace("T", " "),
+            app.get("declared_repo", ""),
+            (s["decision"] or {}).get("decision", ""),
+            "",
+        ])
+    return out
+
+
 def stat(label: str, value: str, tone: str = "") -> str:
     return (
         f'<div class="stat {tone}"><div class="statnum">{e(value)}</div>'
@@ -217,6 +259,41 @@ def render(data: dict, show_contacts: bool) -> str:
             "<p>Every inbound has been scored. Nothing is stuck.</p></section>"
         )
 
+    # A card each is right for reading one person closely and wrong for
+    # comparing twenty. The table is the review surface: one row per applicant,
+    # every column sortable by eye, and each row jumps to its own card.
+    trows = []
+    for rank, s in enumerate(scored, 1):
+        sc = s["score"] or {}
+        nflags = len(sc.get("flags") or [])
+        trows.append(
+            f'<tr><td class="num">{rank}</td>'
+            f'<td><a href="#a-{e(s["handle"])}">{e(s["handle"])}</a></td>'
+            f'<td>{e((s["application"] or {}).get("region",""))}</td>'
+            f'<td class="num strong">{(s["total"] or 0):.2f}</td>'
+            f'<td class="num">{float(sc.get("automated_total",0)):.1f}</td>'
+            f'<td class="num">{float(sc.get("application_total",0)):.1f}</td>'
+            f'<td>{f"<span class=pill-warn>{nflags}</span>" if nflags else "<span class=dash>—</span>"}</td>'
+            f'<td>{e((s["decision"] or {}).get("decision","")) or "<span class=dash>not decided</span>"}</td>'
+            f'<td class="when">{when(s["received_at"])}</td></tr>'
+        )
+    for s in unfinished:
+        trows.append(
+            f'<tr class="row-bad"><td class="num">—</td>'
+            f'<td>{e(s["handle"] or s["raw_handle"])}</td>'
+            f'<td>{e((s["application"] or {}).get("region",""))}</td>'
+            f'<td class="num" colspan="4">{e(STATUS_LABEL.get(s["status"], s["status"]))}</td>'
+            f'<td><span class=dash>—</span></td>'
+            f'<td class="when">{when(s["received_at"])}</td></tr>'
+        )
+    table = (
+        '<section><h2>All inbound</h2><div class="scroll">'
+        '<table class="grid"><thead><tr>'
+        "<th>#</th><th>Handle</th><th>Continent</th><th>Score</th>"
+        "<th>Auto</th><th>App</th><th>Flags</th><th>Decision</th><th>Applied</th>"
+        f'</tr></thead><tbody>{"".join(trows)}</tbody></table></div></section>'
+    )
+
     cards = []
     for rank, s in enumerate(scored, 1):
         app = s["application"]
@@ -244,7 +321,7 @@ def render(data: dict, show_contacts: bool) -> str:
         tone = "warn" if nflags else "good"
 
         cards.append(
-            f"""<article class="card {tone}">
+            f"""<article class="card {tone}" id="a-{e(s['handle'])}">
   <header>
     <div class="who">
       <span class="rank">{rank}</span>
@@ -372,6 +449,25 @@ def render(data: dict, show_contacts: bool) -> str:
   .contact, .repo {{ font-size:.88rem; margin:.55rem 0 0; }}
 
   .scroll {{ overflow-x:auto; }}
+  table.grid {{ width:100%; border-collapse:collapse; font-size:.88rem;
+                background:var(--card); border:1px solid var(--line);
+                border-radius:.5rem; overflow:hidden; }}
+  table.grid th {{ text-align:left; font-family:Outfit,sans-serif; font-size:.72rem;
+                   font-weight:600; text-transform:uppercase; letter-spacing:.07em;
+                   color:var(--muted); padding:.6rem .7rem; white-space:nowrap;
+                   border-bottom:1px solid var(--line); }}
+  table.grid td {{ padding:.55rem .7rem; border-bottom:1px solid var(--line);
+                   white-space:nowrap; }}
+  table.grid tr:last-child td {{ border-bottom:0; }}
+  table.grid td.num {{ text-align:right; font-variant-numeric:tabular-nums; }}
+  table.grid td.strong {{ font-weight:600; font-size:1rem; }}
+  table.grid td.when {{ color:var(--muted); font-size:.8rem; }}
+  table.grid tr.row-bad td {{ background:var(--badbg); }}
+  .dash {{ color:var(--muted); }}
+  .pill-warn {{ display:inline-block; min-width:1.3rem; text-align:center;
+                font-size:.72rem; font-weight:600; border-radius:1rem;
+                padding:.05rem .45rem; color:var(--warn);
+                background:var(--warnbg); border:1px solid var(--warn); }}
   table.dims {{ width:100%; border-collapse:collapse; }}
   table.dims th {{ text-align:left; font-weight:500; width:11rem; vertical-align:top;
                    padding:.5rem .8rem .5rem 0; border-top:1px solid var(--line); }}
@@ -408,8 +504,9 @@ def render(data: dict, show_contacts: bool) -> str:
   </header>
   <section class="stats">{tiles}</section>
   {issues}
+  {table}
   <section>
-    <h2>Applicants, highest score first</h2>
+    <h2>Applicants in detail</h2>
     {withheld}
   </section>
   {''.join(cards)}
@@ -422,6 +519,10 @@ def main() -> None:
     ap.add_argument("--db", default=DEFAULT_DB)
     ap.add_argument("--out", default=os.path.expanduser("~/talent-engine-runtime/crm.html"))
     ap.add_argument(
+        "--csv",
+        help="also write a spreadsheet of the same data, for the stewards' sheet",
+    )
+    ap.add_argument(
         "--contacts",
         action="store_true",
         help="include applicant contact details; only for a file that stays on "
@@ -432,6 +533,12 @@ def main() -> None:
     data = collect(args.db)
     with open(args.out, "w") as fh:
         fh.write(render(data, args.contacts))
+    if args.csv:
+        with open(args.csv, "w", newline="") as fh:
+            w = csv.writer(fh)
+            w.writerow(CSV_COLUMNS)
+            w.writerows(csv_rows(data, args.contacts))
+        print(f"wrote {args.csv}")
     n = len(data["submissions"])
     stuck = sum(1 for s in data["submissions"] if s["status"] not in FINISHED)
     print(f"wrote {args.out}: {n} inbound, {stuck} needing attention"
