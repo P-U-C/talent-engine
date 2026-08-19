@@ -47,7 +47,7 @@ def _seeded(tmp_path):
 
 def test_the_feed_carries_the_score(tmp_path):
     out = scores_feed.csv_for(_seeded(tmp_path))
-    assert out.startswith("Handle,Continent,Score,")
+    assert out.startswith("Rank,Handle,Continent,Score,")
     assert "amara-dev" in out
     assert "61.50" in out
     assert "Africa" in out
@@ -72,3 +72,28 @@ def test_an_unscored_applicant_is_still_listed(tmp_path):
     out = scores_feed.csv_for(str(db))
     assert "stuck-dev" in out
     assert "stuck" in out.lower()
+
+
+def test_rows_follow_arrival_order_not_score_order(tmp_path):
+    """The tab is read beside the one Tally writes, so the two must agree line
+    for line. Ranking the feed made row N a different person in each tab."""
+    db = tmp_path / "t.db"
+    store = Store(db)
+    for sid, handle, total in (
+        ("s1", "first-in", 20.0),
+        ("s2", "second-in", 90.0),
+        ("s3", "third-in", 55.0),
+    ):
+        store.record_submission(
+            sid, "prog", "tally", handle, handle,
+            Application(declared_repo="", region="Africa"),
+        )
+        store.finish_submission(sid, "scored", total=total)
+    store.close()
+
+    lines = scores_feed.csv_for(str(db)).strip().splitlines()
+    handles = [ln.split(",")[1] for ln in lines[1:]]
+    assert handles == ["first-in", "second-in", "third-in"]
+
+    ranks = [ln.split(",")[0] for ln in lines[1:]]
+    assert ranks == ["3", "1", "2"]  # standing is a column, not the order

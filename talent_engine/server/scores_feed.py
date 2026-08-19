@@ -20,6 +20,9 @@ Two deliberate limits:
     reads it. The terms applicants accepted keep contact details out of any
     shared artefact, and the strongest way to keep a projection honest is to
     make the data absent rather than excluded.
+*   Rows come out in arrival order, not score order, because this tab is read
+    beside the one Tally writes and the two have to agree line for line.
+    Standing travels as a Rank column instead.
 *   The path carries a random token because IMPORTDATA fetches anonymously, so
     the URL is the only thing standing between this and the open web. Scores and
     public GitHub handles are not secrets, but "no unselected applicant is named
@@ -35,6 +38,7 @@ import sqlite3
 # Mirrors the score columns of the Pools CRM sheet the programme already runs
 # on, so the pulled tab lines up with what the stewards read elsewhere.
 COLUMNS = [
+    "Rank",
     "Handle",
     "Continent",
     "Score",
@@ -75,7 +79,7 @@ def _split(payload: str) -> tuple[str, str]:
 
 
 def csv_for(db_path: str) -> str:
-    """Every inbound as one row, ranked, with no contact detail anywhere."""
+    """Every inbound as one row, in arrival order, with no contact detail."""
     import json
 
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -95,10 +99,19 @@ def csv_for(db_path: str) -> str:
     finally:
         conn.close()
 
-    rows = sorted(
-        subs,
-        key=lambda s: (s["status"] != "scored", s["total"] is None, -(s["total"] or 0)),
+    # Arrival order, matching the tab Tally writes. The sheet is read beside
+    # that tab, so row N here has to be the same person as row N there --
+    # ranking the feed instead made the two tabs disagree line for line, which
+    # is worse than useless when you are reading across.
+    rows = sorted(subs, key=lambda s: (s["received_at"] or ""))
+
+    # Standing still matters, so it travels as a column rather than as the sort
+    # order. Only scored applicants have one.
+    ranked = sorted(
+        (s for s in subs if s["status"] == "scored" and s["total"] is not None),
+        key=lambda s: -s["total"],
     )
+    rank_of = {s["handle"]: i for i, s in enumerate(ranked, 1)}
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(COLUMNS)
@@ -110,6 +123,7 @@ def csv_for(db_path: str) -> str:
         except (json.JSONDecodeError, TypeError):
             app = {}
         w.writerow([
+            rank_of.get(s["handle"], ""),
             s["handle"] or s["raw_handle"],
             app.get("region", ""),
             f'{s["total"]:.2f}' if s["total"] is not None else "",
