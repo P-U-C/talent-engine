@@ -35,7 +35,9 @@ import csv
 import io
 import sqlite3
 
-# Only what the Tally tab does not already hold. Continent, submitted-at and
+# UID leads: it is the programme's own reference for an applicant, in the same
+# shape as the identifiers in the Pools CRM, and it is what a steward quotes in
+# an email. Only what the Tally tab does not already hold follows. Continent, submitted-at and
 # the declared repo are all columns over there already, and duplicating them
 # invites the two copies to disagree. Submission ID leads because it is the
 # join key: it appears in column A of the Tally tab, it is exact, and it does
@@ -46,6 +48,7 @@ import sqlite3
 # "Trovic1" and a full github.com URL; matching on what they typed would fail
 # on exactly the rows a steward most wants to look up.
 COLUMNS = [
+    "UID",
     "Submission ID",
     "Rank",
     "Handle",
@@ -90,8 +93,10 @@ def csv_for(db_path: str) -> str:
     conn.row_factory = sqlite3.Row
     try:
         subs = conn.execute(
-            "select submission_id, handle, raw_handle, received_at, status, total"
-            " from submissions"
+            "select s.submission_id, s.handle, s.raw_handle, s.received_at,"
+            " s.status, s.total, coalesce(u.uid, '') as uid"
+            " from submissions s"
+            " left join applicant_uids u on u.submission_id = s.submission_id"
         ).fetchall()
         # Newest score per handle: a handle can be re-scored, and the sheet
         # should show what stands now rather than the first attempt.
@@ -123,6 +128,7 @@ def csv_for(db_path: str) -> str:
         payload = payloads.get(s["handle"], "")
         automated, application = _split(payload) if payload else ("", "")
         w.writerow([
+            s["uid"],
             s["submission_id"],
             rank_of.get(s["handle"], ""),
             s["handle"] or s["raw_handle"],

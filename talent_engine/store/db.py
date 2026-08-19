@@ -218,6 +218,27 @@ CREATE INDEX IF NOT EXISTS idx_ledger_type ON operating_ledger(entry_type);
 -- score, never in a dossier. Joined to a submission by id when a human needs
 -- to reach someone, and separable from everything publishable by dropping
 -- this one table.
+CREATE TABLE IF NOT EXISTS uid_counters (
+    -- High-water mark per prefix. Separate from the uid table on purpose:
+    -- deriving the next number from MAX(seq) hands the deleted row's number to
+    -- the next applicant, which points an already-quoted reference at a
+    -- different person. This only ever counts up.
+    prefix TEXT PRIMARY KEY,
+    next_seq INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS applicant_uids (
+    -- A human-facing reference for one applicant, in the same shape as the
+    -- programme's other identifiers (PRE-S3-S-001). It is allocated once, on
+    -- arrival, and stored -- never derived from position. A number computed
+    -- from row order silently renumbers everyone below a deleted row, and a
+    -- reference that has been read out in an email must not move.
+    submission_id TEXT PRIMARY KEY,
+    uid TEXT NOT NULL UNIQUE,
+    seq INTEGER NOT NULL,
+    assigned_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS contacts (
     submission_id TEXT PRIMARY KEY,
     email TEXT DEFAULT '',
@@ -880,6 +901,53 @@ class Store:
         )
         self.conn.commit()
         return cur.rowcount == 1
+
+    def assign_uid(self, submission_id: str, prefix: str, width: int = 3) -> str:
+        """Return this submission's reference, allocating one on first sight.
+
+        Idempotent: a webhook retry, a requeue or a second read all get the
+        same string back. Sequence numbers are per prefix, so changing the
+        season starts a new run of numbers rather than continuing the old one.
+        """
+        row = self.conn.execute(
+            "SELECT uid FROM applicant_uids WHERE submission_id = ?", (submission_id,)
+        ).fetchone()
+        if row:
+            return row["uid"]
+
+        counter = self.conn.execute(
+            "SELECT next_seq FROM uid_counters WHERE prefix = ?", (prefix,)
+        ).fetchone()
+        if counter is None:
+            # First use of this prefix. Seed above anything already issued, so
+            # adopting the counter on a live database cannot re-issue a
+            # reference that has already gone out.
+            issued = self.conn.execute(
+                "SELECT COALESCE(MAX(seq), 0) FROM applicant_uids WHERE uid LIKE ?",
+                (f"{prefix}%",),
+            ).fetchone()[0]
+            seq = int(issued) + 1
+        else:
+            seq = int(counter["next_seq"])
+        self.conn.execute(
+            "INSERT INTO uid_counters (prefix, next_seq) VALUES (?, ?) "
+            "ON CONFLICT(prefix) DO UPDATE SET next_seq = excluded.next_seq",
+            (prefix, seq + 1),
+        )
+        uid = f"{prefix}{seq:0{width}d}"
+        self.conn.execute(
+            "INSERT INTO applicant_uids (submission_id, uid, seq, assigned_at) "
+            "VALUES (?, ?, ?, ?)",
+            (submission_id, uid, seq, utc_now_iso()),
+        )
+        self.conn.commit()
+        return uid
+
+    def uid_for(self, submission_id: str) -> str:
+        row = self.conn.execute(
+            "SELECT uid FROM applicant_uids WHERE submission_id = ?", (submission_id,)
+        ).fetchone()
+        return row["uid"] if row else ""
 
     def record_contact(self, submission_id: str, contact: Any) -> None:
         """Store contact details in the quarantined table.

@@ -138,6 +138,11 @@ class IntakeService:
                 form_id=sub.form_id,
                 status="queued" if sub.ok else "unparsable",
             )
+            if fresh and self.cfg.uid_prefix:
+                # On arrival, so the reference exists even for a submission
+                # that never scores. The two applicants stranded on launch day
+                # still need something a steward can call them by.
+                self._intake_store.assign_uid(sub.submission_id, self.cfg.uid_prefix)
             if fresh and not sub.contact.is_empty():
                 self._intake_store.record_contact(sub.submission_id, sub.contact)
             if fresh and not sub.ok:

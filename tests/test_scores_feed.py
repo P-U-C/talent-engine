@@ -47,7 +47,7 @@ def _seeded(tmp_path):
 
 def test_the_feed_carries_the_score(tmp_path):
     out = scores_feed.csv_for(_seeded(tmp_path))
-    assert out.startswith("Submission ID,Rank,Handle,Score,")
+    assert out.startswith("UID,Submission ID,Rank,Handle,Score,")
     assert "amara-dev" in out
     assert "61.50" in out
     # Submission ID is the join key: it is column A of the tab Tally writes.
@@ -93,8 +93,8 @@ def test_rows_follow_arrival_order_not_score_order(tmp_path):
     store.close()
 
     lines = scores_feed.csv_for(str(db)).strip().splitlines()
-    handles = [ln.split(",")[2] for ln in lines[1:]]
+    handles = [ln.split(",")[3] for ln in lines[1:]]
     assert handles == ["first-in", "second-in", "third-in"]
 
-    ranks = [ln.split(",")[1] for ln in lines[1:]]
+    ranks = [ln.split(",")[2] for ln in lines[1:]]
     assert ranks == ["3", "1", "2"]  # standing is a column, not the order
