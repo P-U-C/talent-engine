@@ -41,7 +41,7 @@ from ..notify import application_scored
 from ..scoring.concerns import concerns
 from ..scoring.engine import CODE_VERSION, score_snapshot
 from ..store.db import Store
-from . import scores_feed
+from . import scores_feed, scouted_feed
 
 log = logging.getLogger("talent_engine.intake")
 
@@ -316,6 +316,11 @@ def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[st
     # the URL never changes. Contacts are deliberately absent from the served
     # copy; they are in the Tally tab of the stewards' own sheet, which does
     # not need a second home on a URL that anyone holding it can open.
+    # The scout's own leads, beside the applicants'. Same access model; a
+    # separate token so that revoking one does not take the other down with it.
+    scout_token = os.environ.get("SCOUT_FEED_TOKEN", "").strip()
+    scout_path = f"/scouted/{scout_token}.csv" if scout_token else None
+
     board_token = os.environ.get("BOARD_TOKEN", "").strip()
     board_path = f"/board/{board_token}.html" if board_token else None
     board_file = os.environ.get("BOARD_HTML", "").strip()
@@ -374,6 +379,15 @@ def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[st
                 except sqlite3.Error:
                     log.exception("scores feed could not read the database")
                     self._plain(503, "scores unavailable\n")
+                    return
+                self._send(200, "text/csv; charset=utf-8", body, no_store=True)
+                return
+            if scout_path and hmac.compare_digest(path, scout_path):
+                try:
+                    body = scouted_feed.csv_for(service.db_path, service.cfg.key).encode()
+                except sqlite3.Error:
+                    log.exception("scout feed could not read the database")
+                    self._plain(503, "leads unavailable\n")
                     return
                 self._send(200, "text/csv; charset=utf-8", body, no_store=True)
                 return

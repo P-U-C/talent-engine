@@ -239,6 +239,24 @@ CREATE TABLE IF NOT EXISTS applicant_uids (
     assigned_at TEXT NOT NULL
 );
 
+-- Public profile detail for people the SCOUT found, who have not applied and
+-- have accepted no terms. Deliberately not `contacts`: that table holds what
+-- an applicant gave us under the terms they accepted, and the two must not be
+-- mixed even though both describe how to reach a person. Everything here is
+-- already published on the person's own GitHub profile.
+CREATE TABLE IF NOT EXISTS profile_recon (
+    handle TEXT PRIMARY KEY,
+    x_handle TEXT DEFAULT '',
+    x_source TEXT DEFAULT '',
+    name TEXT DEFAULT '',
+    blog TEXT DEFAULT '',
+    bio TEXT DEFAULT '',
+    location TEXT DEFAULT '',
+    socials TEXT DEFAULT '',
+    email TEXT DEFAULT '',
+    checked_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS contacts (
     submission_id TEXT PRIMARY KEY,
     email TEXT DEFAULT '',
@@ -291,6 +309,17 @@ class Store:
         }.items():
             if name not in cohort_cols:
                 self.conn.execute(ddl)
+
+        recon_cols = {
+            row[1]
+            for row in self.conn.execute("PRAGMA table_info(profile_recon)").fetchall()
+        }
+        if recon_cols and "email" not in recon_cols:
+            self.conn.execute("ALTER TABLE profile_recon ADD COLUMN email TEXT DEFAULT ''")
+        if recon_cols and "socials" not in recon_cols:
+            # Added once the first recon pass showed how many developers keep no
+            # X account at all but do link a Bluesky, Mastodon or LinkedIn.
+            self.conn.execute("ALTER TABLE profile_recon ADD COLUMN socials TEXT DEFAULT ''")
 
     def _restrict_permissions(self) -> None:
         """0600 on the database and its sidecars. Best effort, never fatal."""
@@ -356,6 +385,32 @@ class Store:
             "SELECT payload FROM snapshots WHERE digest = ?", (digest,)
         ).fetchone()
         return _snapshot_from_dict(json.loads(row["payload"])) if row else None
+
+    def save_recon(self, found: dict) -> None:
+        """Record where a scouted candidate can be reached.
+
+        Overwrites rather than accumulating: a profile is a current statement,
+        and keeping yesterday's website would only invite someone to message a
+        dead link.
+        """
+        self.conn.execute(
+            "INSERT OR REPLACE INTO profile_recon "
+            "(handle, x_handle, x_source, name, blog, bio, location, socials, email, checked_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                found["handle"], found.get("x_handle", ""), found.get("x_source", ""),
+                found.get("name", ""), found.get("blog", ""), found.get("bio", ""),
+                found.get("location", ""), found.get("socials", ""),
+                found.get("email", ""), utc_now_iso(),
+            ),
+        )
+        self.conn.commit()
+
+    def recon_for(self, handle: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM profile_recon WHERE handle = ?", (handle,)
+        ).fetchone()
+        return dict(row) if row else None
 
     def save_score(self, run_id: str, score: CandidateScore) -> None:
         self.conn.execute(
