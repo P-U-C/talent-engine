@@ -10,20 +10,14 @@ ENV_FILE=/home/ubuntu/talent-engine-runtime/intake.env
 REPO=/home/ubuntu/talent-engine
 LOG=/home/ubuntu/talent-engine-runtime/daily-scout.log
 
-PROGRAM=prezenti-sponsorship-trial
-# Seed repositories the contributor channel expands outward from. Note that
-# taxonomy orgs in the program config affect SCORING, not discovery — adding an
-# org there does not make the scout crawl it. Only these seeds do.
-#
-# Chosen to span Celo product work, wallets, MCP implementations, agent
-# identity and payments, EVM engineering, agent orchestration, and durable
-# production systems.
-SEEDS="celo-org/celo-composer,celo-org/celo-monorepo,celo-org/developer-tooling,valora-xyz/wallet,valory-xyz/open-autonomy,modelcontextprotocol/servers,modelcontextprotocol/typescript-sdk,modelcontextprotocol/python-sdk,x402-foundation/x402,google-agentic-commerce/a2a-x402,coinbase/agentkit,agent0lab/agent0-ts,OpenZeppelin/openzeppelin-contracts,foundry-rs/foundry,langchain-ai/langgraph,temporalio/temporal"
-
-# Per-seed caps. Very large repositories are capped below the focused ones:
-# their merged-PR stream is dominated by maintainer churn, and an uncapped
-# share would crowd out the smaller, denser sources.
-CAPS="modelcontextprotocol/servers:10,OpenZeppelin/openzeppelin-contracts:10,foundry-rs/foundry:10,temporalio/temporal:10,langchain-ai/langgraph:12,celo-org/celo-monorepo:15"
+# What this deployment is: program, seeds and per-seed caps. Kept in one file
+# so that a second deployment copies a config rather than forking this script.
+DEPLOYMENT="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/deployment.env"
+[ -f "$DEPLOYMENT" ] || { echo "$(date -Is) no deployment config at $DEPLOYMENT" >>"$LOG"; exit 1; }
+set -a
+# shellcheck disable=SC1090
+. "$DEPLOYMENT"
+set +a
 
 [ -f "$ENV_FILE" ] || { echo "$(date -Is) no env file at $ENV_FILE" >>"$LOG"; exit 1; }
 set -a

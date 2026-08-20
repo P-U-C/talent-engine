@@ -2,12 +2,14 @@
 #
 # Pull engine changes from P-U-C/talent-engine into this deployment.
 #
-# The two repositories deliberately disagree about exactly two files. Upstream
+# The two repositories deliberately disagree about exactly three files. Upstream
 # README.md describes the reusable engine; this one is what applicants read
-# before they apply. docs/ENGINE.md exists only here. A plain `git merge`
-# silently resolves both in upstream's favour, which replaced the live
-# application front page with engineering documentation twice in one review --
-# once in each direction. Encoded here so it cannot be forgotten again.
+# before they apply. docs/ENGINE.md exists only here, and deploy/deployment.env
+# is what makes this deployment this one -- the program, the hostname and the
+# repositories the scout crawls. A plain `git merge` silently resolves them in
+# upstream's favour, which replaced the live application front page with
+# engineering documentation twice in one review -- once in each direction.
+# Encoded here so it cannot be forgotten again.
 #
 #   tools/sync-from-upstream.sh            # merge and verify
 #   tools/sync-from-upstream.sh --check    # verify only, no merge
@@ -16,7 +18,7 @@ set -euo pipefail
 
 UPSTREAM_URL="https://github.com/P-U-C/talent-engine.git"
 UPSTREAM_REMOTE="upstream"
-DEPLOYMENT_FILES=(README.md docs/ENGINE.md)
+DEPLOYMENT_FILES=(README.md docs/ENGINE.md deploy/deployment.env)
 DEPLOYMENT_MARKER="Prezenti AI Builder Sponsorships"
 
 cd "$(dirname "$0")/.."
