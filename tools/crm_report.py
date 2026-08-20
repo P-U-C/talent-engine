@@ -64,6 +64,12 @@ def collect(db_path: str) -> dict:
             " from submissions order by received_at",
         )
         contacts = {c["submission_id"]: c for c in rows(conn, "select * from contacts")}
+        # The reference a steward quotes in a meeting. It lives in its own
+        # table rather than on the submission, so it survives a re-score.
+        uids = {
+            u["submission_id"]: u["uid"]
+            for u in rows(conn, "select submission_id, uid from applicant_uids")
+        }
         decisions = {d["handle"]: d for d in rows(conn, "select * from decisions")}
         cohort = {c["handle"]: c for c in rows(conn, "select * from cohort")}
         quarantine = defaultdict(list)
@@ -88,6 +94,7 @@ def collect(db_path: str) -> dict:
         except json.JSONDecodeError:
             sub["application"] = {}
         sub["contact"] = contacts.get(sub["submission_id"], {})
+        sub["uid"] = uids.get(sub["submission_id"], "")
         sub["score"] = payloads.get(sub["handle"])
         sub["decision"] = decisions.get(sub["handle"])
         sub["cohort"] = cohort.get(sub["handle"])
@@ -174,7 +181,7 @@ def render_contact(sub: dict, show: bool) -> str:
 # steward reading both is not re-learning a layout. `Notes` is deliberately left
 # empty: it is the steward's column, and this tool never writes into it.
 CSV_COLUMNS = [
-    "Handle", "Name", "Email", "Telegram", "X", "Continent", "Score",
+    "UID", "Handle", "Name", "Email", "Telegram", "X", "Continent", "Score",
     "Automated", "Application", "Flags", "Status", "Applied", "Declared repo",
     "Decision", "Notes",
 ]
@@ -192,6 +199,7 @@ def csv_rows(data: dict, show_contacts: bool) -> list[list[str]]:
         app = s["application"]
         flags = sc.get("flags") or []
         out.append([
+            s["uid"],
             s["handle"] or s["raw_handle"],
             c.get("name", ""),
             c.get("email", ""),
@@ -267,7 +275,8 @@ def render(data: dict, show_contacts: bool) -> str:
         sc = s["score"] or {}
         nflags = len(sc.get("flags") or [])
         trows.append(
-            f'<tr><td class="num">{rank}</td>'
+            f'<tr><td class="uid">{e(s["uid"])}</td>'
+            f'<td class="num">{rank}</td>'
             f'<td><a href="#a-{e(s["handle"])}">{e(s["handle"])}</a></td>'
             f'<td>{e((s["application"] or {}).get("region",""))}</td>'
             f'<td class="num strong">{(s["total"] or 0):.2f}</td>'
@@ -279,7 +288,8 @@ def render(data: dict, show_contacts: bool) -> str:
         )
     for s in unfinished:
         trows.append(
-            f'<tr class="row-bad"><td class="num">—</td>'
+            f'<tr class="row-bad"><td class="uid">{e(s["uid"])}</td>'
+            f'<td class="num">—</td>'
             f'<td>{e(s["handle"] or s["raw_handle"])}</td>'
             f'<td>{e((s["application"] or {}).get("region",""))}</td>'
             f'<td class="num" colspan="4">{e(STATUS_LABEL.get(s["status"], s["status"]))}</td>'
@@ -289,7 +299,7 @@ def render(data: dict, show_contacts: bool) -> str:
     table = (
         '<section><h2>All inbound</h2><div class="scroll">'
         '<table class="grid"><thead><tr>'
-        "<th>#</th><th>Handle</th><th>Continent</th><th>Score</th>"
+        "<th>UID</th><th>#</th><th>Handle</th><th>Continent</th><th>Score</th>"
         "<th>Auto</th><th>App</th><th>Flags</th><th>Decision</th><th>Applied</th>"
         f'</tr></thead><tbody>{"".join(trows)}</tbody></table></div></section>'
     )
@@ -329,7 +339,7 @@ def render(data: dict, show_contacts: bool) -> str:
     </div>
     <div class="total">{total:.2f}<span class="outof">/100</span></div>
   </header>
-  <div class="meta">applied {when(s['received_at'])} · via {e(s['source'])}{' · ' + e(split) if split else ''}</div>
+  <div class="meta">{f'<span class="uid">{e(s["uid"])}</span> · ' if s["uid"] else ''}applied {when(s['received_at'])} · via {e(s['source'])}{' · ' + e(split) if split else ''}</div>
   <div class="pills">{''.join(badges)}</div>
   {render_contact(s, show_contacts)}
   {f'<p class="repo">Declared repo <a href="{e(repo)}">{e(repo)}</a></p>' if repo else ''}
@@ -350,6 +360,10 @@ def render(data: dict, show_contacts: bool) -> str:
     )
 
     return f"""<title>Prezenti Applicant Board</title>
+<!-- An ISO stamp for machines. The header states the same time in a form a
+     person reads, but the surfaces check greps for a date and a frozen page
+     that still answers 200 is the exact failure it exists to catch. -->
+<meta name="generated" content="{datetime.now(timezone.utc).isoformat(timespec="seconds")}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&family=JetBrains+Mono:wght@400&display=swap">
@@ -462,6 +476,11 @@ def render(data: dict, show_contacts: bool) -> str:
   table.grid td.num {{ text-align:right; font-variant-numeric:tabular-nums; }}
   table.grid td.strong {{ font-weight:600; font-size:1rem; }}
   table.grid td.when {{ color:var(--muted); font-size:.8rem; }}
+  /* The reference is for quoting aloud and pasting into a message, so it is
+     monospaced and does not wrap mid-identifier. */
+  table.grid td.uid, .meta .uid {{ font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.78rem;
+    letter-spacing:.02em; white-space:nowrap; color:var(--muted); }}
+  table.grid td.uid {{ color:var(--fg); }}
   table.grid tr.row-bad td {{ background:var(--badbg); }}
   .dash {{ color:var(--muted); }}
   .pill-warn {{ display:inline-block; min-width:1.3rem; text-align:center;
@@ -523,6 +542,13 @@ def main() -> None:
         help="also write a spreadsheet of the same data, for the stewards' sheet",
     )
     ap.add_argument(
+        "--standalone",
+        action="store_true",
+        help="emit a complete HTML document. The artefact publisher wraps the "
+        "fragment itself, but a file served straight off the tunnel has to "
+        "carry its own doctype or the browser renders it in quirks mode",
+    )
+    ap.add_argument(
         "--contacts",
         action="store_true",
         help="include applicant contact details; only for a file that stays on "
@@ -531,8 +557,26 @@ def main() -> None:
     args = ap.parse_args()
 
     data = collect(args.db)
+    body = render(data, args.contacts)
+    if args.standalone:
+        # render() returns the fragment the artefact publisher expects: title,
+        # font links and stylesheet first, then the page itself. Served direct,
+        # it needs a real document around it -- and the split has to fall after
+        # the stylesheet, or the <link> and <style> end up in the body where
+        # they do not belong.
+        cut = body.index("</style>") + len("</style>")
+        head, rest = body[:cut], body[cut:]
+        body = (
+            '<!doctype html>\n<html lang="en">\n<head>\n'
+            '<meta charset="utf-8">\n'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">\n'
+            # Reachable by URL alone: no search engine should ever carry an
+            # applicant's name because this page was indexed.
+            '<meta name="robots" content="noindex,nofollow,noarchive">\n'
+            f"{head}\n</head>\n<body>{rest}</body>\n</html>\n"
+        )
     with open(args.out, "w") as fh:
-        fh.write(render(data, args.contacts))
+        fh.write(body)
     if args.csv:
         with open(args.csv, "w", newline="") as fh:
             w = csv.writer(fh)

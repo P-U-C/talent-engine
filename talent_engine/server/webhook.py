@@ -309,6 +309,17 @@ def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[st
     feed_token = os.environ.get("SCORES_FEED_TOKEN", "").strip()
     feed_path = f"/scores/{feed_token}.csv" if feed_token else None
 
+    # The applicant board, same trick for a different reason. Published as an
+    # artefact it is a photograph: correct the moment it is taken and wrong by
+    # the next morning, because nothing on a schedule can republish it. Served
+    # here it is a window -- cron rewrites the file every fifteen minutes and
+    # the URL never changes. Contacts are deliberately absent from the served
+    # copy; they are in the Tally tab of the stewards' own sheet, which does
+    # not need a second home on a URL that anyone holding it can open.
+    board_token = os.environ.get("BOARD_TOKEN", "").strip()
+    board_path = f"/board/{board_token}.html" if board_token else None
+    board_file = os.environ.get("BOARD_HTML", "").strip()
+
     class Handler(BaseHTTPRequestHandler):
         server_version = "talent-engine"
         sys_version = ""
@@ -317,7 +328,7 @@ def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[st
             log.info("%s %s", self.address_string(), fmt % args)
 
         def _send(self, code: int, content_type: str, payload: bytes,
-                  no_store: bool = False) -> None:
+                  no_store: bool = False, csp: str | None = None) -> None:
             self.send_response(code)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(payload)))
@@ -331,6 +342,7 @@ def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[st
             # policy can be this tight: no scripts of our own, no other origins.
             self.send_header(
                 "Content-Security-Policy",
+                csp or
                 # data: for the embedded brand fonts, which are inlined
                 # rather than fetched so the page makes no external request.
                 "default-src 'none'; style-src 'unsafe-inline'; font-src data:; "
@@ -364,6 +376,28 @@ def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[st
                     self._plain(503, "scores unavailable\n")
                     return
                 self._send(200, "text/csv; charset=utf-8", body, no_store=True)
+                return
+            if board_path and board_file and hmac.compare_digest(path, board_path):
+                try:
+                    with open(board_file, "rb") as fh:
+                        body = fh.read()
+                except OSError:
+                    # The file is written by cron, not by this process, so a
+                    # missing one means the rebuild failed -- say so rather
+                    # than serving a stale copy or an empty page.
+                    log.exception("board file could not be read: %s", board_file)
+                    self._plain(503, "board unavailable\n")
+                    return
+                self._send(
+                    200, "text/html; charset=utf-8", body, no_store=True,
+                    # The board is the one page here that reaches outside for
+                    # anything: the brand typefaces come from Google Fonts.
+                    csp=("default-src 'none'; "
+                         "style-src 'unsafe-inline' https://fonts.googleapis.com; "
+                         "font-src https://fonts.gstatic.com; img-src data:; "
+                         "base-uri 'none'; frame-ancestors 'none'; "
+                         "form-action 'none'"),
+                )
                 return
             page = pages.get(path) or (pages.get(path.rstrip("/")) if path != "/" else None)
             if page:
