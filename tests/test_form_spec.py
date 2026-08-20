@@ -45,17 +45,20 @@ def build_payload(spec) -> dict:
     fields = []
     for i, q in enumerate(spec["questions"]):
         target = q["maps_to"]
-        if q["type"] == "CHECKBOX":
+        if q["type"] in ("CHECKBOX", "MULTIPLE_CHOICE"):
             options = [
                 {"id": f"opt_{i}_{j}", "text": text}
                 for j, text in enumerate(q.get("options", []))
             ]
-            # Tick the first two where there are two, otherwise the only one.
-            ticked = [o["id"] for o in options[:2]]
+            # Tally sends selected option *ids* for both shapes; the only
+            # difference is how many may be ticked. A single-select still
+            # arrives as a one-element list, so the parser has to resolve it
+            # through `options` either way.
+            ticked = [o["id"] for o in (options[:1] if q["type"] == "MULTIPLE_CHOICE" else options[:2])]
             field = {
                 "key": f"question_{i}",
                 "label": q["label"],
-                "type": "CHECKBOX",
+                "type": q["type"],
                 "value": ticked,
                 "options": options,
             }
@@ -91,6 +94,7 @@ def test_every_declared_mapping_actually_resolves(spec):
         "contact.x": contact.x,
         "application.declared_repo": app.declared_repo,
         "application.build_plan": app.build_plan,
+        "application.region": app.region,
         "application.context_statement": app.context_statement,
         "application.referrer_name": app.referrer_name,
         "application.context_factors": app.context_factors,

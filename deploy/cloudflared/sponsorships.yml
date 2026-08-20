@@ -1,0 +1,46 @@
+# Public ingress for the talent-engine sponsorship page and form intake.
+#
+# TEMPLATE. ${TUNNEL_ID} is filled in by deploy/install.sh from the tunnel this
+# host actually owns; the credentials JSON beside it never leaves the box.
+# Explicit path allowlist: the landing page, health, and the signed webhook.
+# Everything else is 404 at Cloudflare's edge, so the tunnel cannot be used to
+# reach anything else on this host even if the local service grew a new route.
+tunnel: ${TUNNEL_ID}
+credentials-file: /etc/cloudflared/${TUNNEL_ID}.json
+no-autoupdate: true
+
+ingress:
+  - hostname: sponsorships.prezenti.xyz
+    path: ^/$
+    service: http://127.0.0.1:8787
+  - hostname: sponsorships.prezenti.xyz
+    path: ^/apply/?$
+    service: http://127.0.0.1:8787
+  - hostname: sponsorships.prezenti.xyz
+    path: ^/webhook/tally/?$
+    service: http://127.0.0.1:8787
+  - hostname: sponsorships.prezenti.xyz
+    path: ^/healthz$
+    service: http://127.0.0.1:8787
+  # Scores CSV for the stewards' spreadsheet to pull with IMPORTDATA. The
+  # sheet lives inside the Prezenti workspace and cannot be shared outward, so
+  # the scores travel to it instead. The token in the path is the whole access
+  # control -- Google fetches anonymously -- so the pattern demands a long one
+  # rather than allowing /scores/anything. Serves no contact details; the
+  # module behind it never opens that table.
+  - hostname: sponsorships.prezenti.xyz
+    path: ^/scores/[A-Za-z0-9_-]{20,}\.csv$
+    service: http://127.0.0.1:8787
+  # The scout's lead list, pulled by the same sheet. Public GitHub profiles and
+  # the contact links those profiles publish; no applicant data.
+  - hostname: sponsorships.prezenti.xyz
+    path: ^/scouted/[A-Za-z0-9_-]{20,}\.csv$
+    service: http://127.0.0.1:8787
+  # The applicant board the stewards read. Same token-in-path reasoning as the
+  # scores feed, and the same reason it is served rather than published: a
+  # snapshot goes stale the moment the next application lands, and cron can
+  # rewrite a file but cannot republish an artefact.
+  - hostname: sponsorships.prezenti.xyz
+    path: ^/board/[A-Za-z0-9_-]{20,}\.html$
+    service: http://127.0.0.1:8787
+  - service: http_status:404

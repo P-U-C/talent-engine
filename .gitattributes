@@ -1,0 +1,7 @@
+# This fork is a deployment of P-U-C/talent-engine. These two files are the
+# deployment's own and must survive every merge from upstream, which has its
+# own versions of both. Requires the `ours` driver, which
+# tools/sync-from-upstream.sh configures:
+#     git config merge.ours.driver true
+README.md       merge=ours
+docs/ENGINE.md  merge=ours

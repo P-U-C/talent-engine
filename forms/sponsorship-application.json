@@ -39,6 +39,21 @@
       "why": "The only field the automated score depends on. A response without a usable one is stored for human review, never zero-scored."
     },
     {
+      "label": "Which continent are you based in?",
+      "type": "MULTIPLE_CHOICE",
+      "required": true,
+      "options": [
+        "Africa",
+        "Asia",
+        "Europe",
+        "Latin America and the Caribbean",
+        "North America",
+        "Oceania"
+      ],
+      "maps_to": "application.region",
+      "why": "Self-declared and shown to stewards so they can see the programme's reach. Earns no points: Invariant 2 keeps it out of the score."
+    },
+    {
       "label": "Which repo should we look at first?",
       "type": "INPUT_TEXT",
       "required": true,

@@ -120,6 +120,10 @@ class ProgramConfig:
     context_statement_enabled: bool = True
     score_free_text: bool = False  # optional pluggable LLM pass, off by default
     mode: str = "program"  # "program" | "recruitment"
+    # Prefix for the human-facing applicant reference, matching whatever the
+    # organisation already uses elsewhere (PRE-S3-S- -> PRE-S3-S-001). Empty
+    # means no references are issued.
+    uid_prefix: str = ""
     # Copy for the public application page. Lives here rather than in the
     # server because the words are the running organisation's to write and
     # sign off, and they should be editable without touching Python. Unset
