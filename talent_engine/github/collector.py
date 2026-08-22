@@ -99,6 +99,27 @@ from .client import BudgetExhausted, GitHubClient
 # undercounts people whose main project is older than their side projects.
 DEFAULT_REPO_SAMPLE = 12
 MAX_COMMIT_PAGES = 3  # 300 commits per repo is far past the saturation point
+# Extra pages for the email fallback below. One extra request per affected
+# repo, only when the author filter came back empty on an obviously-live repo.
+MAX_FALLBACK_COMMIT_PAGES = 1
+
+
+def noreply_email_variants(handle: str, user_id: int | None) -> list[str]:
+    """The commit-author emails GitHub itself generated for this account.
+
+    GitHub's `?author=` commit filter only matches commits whose author email
+    it could link to the account. Anyone whose local git config holds the
+    historical `user@users.noreply.github.com` form (without the numeric id
+    prefix GitHub switched to) pushes work the filter cannot see -- months of
+    commits vanish behind a generic partial_data note, indistinguishable from
+    inactivity. Matching these server-generated forms is exactly as spoofable
+    as GitHub's own linkage, no more: both are an email string comparison.
+    """
+    h = handle.lower()
+    variants = [f"{h}@users.noreply.github.com"]
+    if user_id is not None:
+        variants.insert(0, f"{user_id}+{h}@users.noreply.github.com")
+    return variants
 
 
 class Collector:
@@ -114,6 +135,8 @@ class Collector:
         self.window_days = window_days
         self.repo_sample = repo_sample
         self.now = now or datetime.now(timezone.utc)
+        self._noreply_emails: list[str] = []
+        self._email_fallback_hits: list[str] = []
 
     @property
     def window_start(self) -> datetime:
@@ -146,6 +169,16 @@ class Collector:
             + [iso_week(pr.merged_at) for pr in snap.merged_prs]
             + [iso_week(rv.submitted_at) for rv in snap.reviews]
         )
+        if self._email_fallback_hits:
+            # Tell the applicant how to stop needing the fallback -- a score
+            # that silently depended on git config hygiene is a bad score.
+            snap.collection_notes.append(
+                "attribution note: some commits were only matchable by email, "
+                "not by GitHub login. Your local `git config user.email` is "
+                "likely the legacy unprefixed noreply form; setting it to "
+                f"'{self._noreply_emails[0]}' makes every commit directly "
+                "linkable to your account"
+            )
         snap.collection_notes.append(
             f"client: {self.client.stats['requests_spent']} requests, "
             f"{self.client.stats['served_from_cache_304']} served from cache"
@@ -161,6 +194,7 @@ class Collector:
             snap.collection_notes.append("user not found or not visible")
             return
         snap.account_created_at = user.get("created_at")
+        self._noreply_emails = noreply_email_variants(snap.handle, user.get("id"))
 
     def _collect_repos(self, snap: ProfileSnapshot, since: datetime) -> None:
         repos: list[RepoActivity] = []
@@ -233,23 +267,63 @@ class Collector:
         # server-stamped and is the cheapest thing we already hold that the
         # applicant cannot move.
         created = _parse(repo.created_at)
-        for raw in self.client.paginate(
-            f"/repos/{repo.name}/commits",
-            {"author": snap.handle, "since": since.isoformat()},
-            max_pages=MAX_COMMIT_PAGES,
-        ):
-            count += 1
+
+        def consume(raw: dict[str, Any]) -> bool:
+            """Fold one raw commit. Returns False when skipped as backdated."""
             date = (
                 ((raw.get("commit") or {}).get("author") or {}).get("date")
                 or ((raw.get("commit") or {}).get("committer") or {}).get("date")
             )
             authored = _parse(date)
             if created and authored and authored < created:
-                backdated += 1
-                continue  # unverifiable as evidence of when work happened
+                return False  # unverifiable as evidence of when work happened
             wk = iso_week(date)
             if wk:
                 weeks.append(wk)
+            return True
+
+        for raw in self.client.paginate(
+            f"/repos/{repo.name}/commits",
+            {"author": snap.handle, "since": since.isoformat()},
+            max_pages=MAX_COMMIT_PAGES,
+        ):
+            if consume(raw):
+                count += 1
+            else:
+                backdated += 1
+
+        if count == 0 and self._noreply_emails:
+            # The login filter returned nothing for a repo the account pushed
+            # in-window. That combination almost always means an unlinked
+            # noreply email (legacy `user@users.noreply.github.com` form), so
+            # take one bounded unfiltered page and match the server-generated
+            # addresses ourselves. Same spoofing surface as GitHub's own
+            # email-based linkage; the bound keeps the budget honest.
+            matched = 0
+            for raw in self.client.paginate(
+                f"/repos/{repo.name}/commits",
+                {"since": since.isoformat()},
+                max_pages=MAX_FALLBACK_COMMIT_PAGES,
+            ):
+                email = (
+                    ((raw.get("commit") or {}).get("author") or {}).get("email") or ""
+                ).lower()
+                handle_login = ((raw.get("author") or {}) or {}).get("login") or ""
+                if email not in self._noreply_emails and handle_login.lower() != snap.handle.lower():
+                    continue
+                if consume(raw):
+                    count += 1
+                    matched += 1
+                else:
+                    backdated += 1
+            if matched:
+                snap.collection_notes.append(
+                    f"{matched} commit(s) in {repo.name} attributed by noreply "
+                    "email fallback (author filter could not link them)"
+                )
+                if repo.name not in self._email_fallback_hits:
+                    self._email_fallback_hits.append(repo.name)
+
         repo.commits_in_window = count
         repo.backdated_commits = backdated
         repo.commit_weeks = sorted(set(weeks))
