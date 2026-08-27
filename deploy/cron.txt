@@ -1,0 +1,10 @@
+# talent-engine: nightly sourcing digest, then recon on what it found.
+# Silent when nothing is new; a digest that says "0 new" trains you to skip it.
+40 12 * * * /home/ubuntu/scripts/daily-scout.sh
+
+# Applicant board rebuild, and an alert when anyone is stuck unscored.
+# The alert is on a count that must be zero -- not on whether the service is up.
+*/15 * * * * /home/ubuntu/scripts/applicant-watch.sh >> /tmp/applicant-watch.log 2>&1
+
+# Nightly ledger backup: audit log, contact details, cohort decisions.
+25 3 * * * /home/ubuntu/scripts/backup-talent-engine.sh >> /home/ubuntu/talent-engine-runtime/backup.log 2>&1

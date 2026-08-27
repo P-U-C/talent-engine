@@ -34,6 +34,7 @@ from .normalize import (
     FACTOR_KEYS,
     HANDLE_KEYS,
     PLAN_KEYS,
+    REGION_KEYS,
     REFERRER_KEYS,
     REPO_KEYS,
     normalize_handle,
@@ -312,6 +313,7 @@ def parse_webhook(payload: dict[str, Any]) -> Submission:
         referrer_name=pick(REFERRER_KEYS),
         declared_repo=pick(REPO_KEYS),
         build_plan=pick(PLAN_KEYS),
+        region=pick(REGION_KEYS),
         extra=_safe_extra(values),
     )
 

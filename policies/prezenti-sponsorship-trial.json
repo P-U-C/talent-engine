@@ -87,13 +87,13 @@
     "feedback_to_unsuccessful_applicants": true
   },
   "status": "open",
-  "applications_close": "2026-08-25",
+  "applications_close": "2026-12-29",
   "term_start": "2026-09",
-  "term_end": "2026-12-29",
+  "term_end": "2027-04-30",
   "terms_release": {
-    "version": "prezenti-sponsorship-trial-2026-08-14-v3",
-    "document": "docs/terms/prezenti-sponsorship-trial-2026-08-14-v3.md",
-    "uri": "https://github.com/prezenti/talent-engine/blob/main/docs/terms/prezenti-sponsorship-trial-2026-08-14-v3.md"
+    "version": "prezenti-sponsorship-trial-2026-08-18-v4",
+    "document": "docs/terms/prezenti-sponsorship-trial-2026-08-18-v4.md",
+    "uri": "https://github.com/prezenti/talent-engine/blob/main/docs/terms/prezenti-sponsorship-trial-2026-08-18-v4.md"
   },
   "attestation": {
     "chain_id": 42220,

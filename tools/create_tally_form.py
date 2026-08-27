@@ -78,7 +78,7 @@ def build_blocks(spec: dict, terms_digest: str = "") -> list[dict]:
             }
         )
 
-        if q["type"] == "CHECKBOX":
+        if q["type"] in ("CHECKBOX", "MULTIPLE_CHOICE"):
             # Tally has no distinct checkbox block: it is a multiple choice
             # with allowMultiple, one block per option, all sharing a group.
             options = [
@@ -99,7 +99,7 @@ def build_blocks(spec: dict, terms_digest: str = "") -> list[dict]:
                             "isRequired": bool(q.get("required")),
                             "isFirst": i == 0,
                             "isLast": i == len(options) - 1,
-                            "allowMultiple": True,
+                            "allowMultiple": q["type"] == "CHECKBOX",
                         },
                     }
                 )
@@ -169,10 +169,15 @@ def main() -> int:
     from talent_engine.programs.policy import load_overlay
 
     terms_digest = load_overlay(args.program).terms_digest()
-    payload: dict = {
-        "blocks": build_blocks(spec, terms_digest),
-        "status": "PUBLISHED" if args.publish else "DRAFT",
-    }
+    payload: dict = {"blocks": build_blocks(spec, terms_digest)}
+    if args.publish:
+        payload["status"] = "PUBLISHED"
+    elif not args.update:
+        # Only a NEW form defaults to DRAFT. Sending it on an --update would
+        # unpublish a live form: on 2026-08-18 that would have taken the
+        # sponsorship application offline the night before launch. An update
+        # leaves the existing status alone unless --publish says otherwise.
+        payload["status"] = "DRAFT"
     if args.workspace:
         payload["workspaceId"] = args.workspace
 

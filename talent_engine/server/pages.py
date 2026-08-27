@@ -32,7 +32,7 @@ from pathlib import Path
 # `page.repo_url` in its program config — the applicant is told to clone this
 # and reproduce their score, so it has to be the repository they can actually
 # read the deployed rubric in.
-REPO_URL = "https://github.com/P-U-C/talent-engine"
+REPO_URL = "https://github.com/prezenti/talent-engine"
 ASSETS = Path(__file__).resolve().parent / "assets"
 
 
@@ -304,8 +304,9 @@ def _status_block(overlay, form_id: str) -> str:
     closing = ""
     if overlay is not None and overlay.applications_close:
         closing = (
-            f'<p class="note">Applications close '
-            f"{html.escape(overlay.applications_close)}.</p>"
+            f'<p class="note">Applications close when the fifth place is '
+            f"filled, or {html.escape(overlay.applications_close)}, whichever "
+            "comes first.</p>"
         )
     version = overlay.terms_digest() if overlay is not None else ""
     return closing + _embed(form_id, version)

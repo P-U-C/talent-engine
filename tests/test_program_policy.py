@@ -257,7 +257,7 @@ def test_the_terms_release_drives_both_form_marker_and_pledge_hash():
     assert o.terms_hash().startswith("0x")
     assert len(o.terms_hash()) == 66
     assert o.terms_digest() == o.terms_hash()[2:14]
-    assert o.terms_release["document"] == "docs/terms/prezenti-sponsorship-trial-2026-08-14-v3.md"
+    assert o.terms_release["document"] == "docs/terms/prezenti-sponsorship-trial-2026-08-18-v4.md"
     assert o.public_attestation_required is True
     assert o.payment["method"] == "direct_to_prezenti_safe"
 
@@ -278,7 +278,9 @@ def test_monitoring_and_selection_are_in_the_terms_digest():
 def test_the_tracker_calendar_is_policy_state():
     o = load_overlay("prezenti-sponsorship-trial")
     assert o.term_start == "2026-09"
-    assert o.term_end == "2026-12-29"
+    # Four months after the last date an application can be accepted: places are
+    # filled as builders are selected, so the calendar has to cover a late one.
+    assert o.term_end == "2027-04-30"
     assert o.attestation_expiration > 0
 
 

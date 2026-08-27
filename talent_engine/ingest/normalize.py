@@ -23,6 +23,7 @@ FACTOR_KEYS = ("context_factors", "factors", "barriers")
 REFERRER_KEYS = ("referrer", "referrer_name", "referred_by", "scout", "endorsed_by")
 REPO_KEYS = ("declared_repo", "project_repo", "repository", "repo", "project")
 PLAN_KEYS = ("build_plan", "plan", "proposal")
+REGION_KEYS = ("region", "continent")
 
 
 def normalize_handle(raw: str) -> str | None:
@@ -103,6 +104,7 @@ def _read(path: str | Path):
                 referrer_name=_first(row, REFERRER_KEYS),
                 declared_repo=_first(row, REPO_KEYS),
                 build_plan=_first(row, PLAN_KEYS),
+                region=_first(row, REGION_KEYS),
                 extra={k: v for k, v in row.items() if v},
             )
             yield handle or "", app, row, bool(handle)

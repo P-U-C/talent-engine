@@ -22,9 +22,12 @@ Security posture:
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
+import os
 import queue
+import sqlite3
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -38,6 +41,7 @@ from ..notify import application_scored
 from ..scoring.concerns import concerns
 from ..scoring.engine import CODE_VERSION, score_snapshot
 from ..store.db import Store
+from . import scores_feed, scouted_feed
 
 log = logging.getLogger("talent_engine.intake")
 
@@ -134,6 +138,11 @@ class IntakeService:
                 form_id=sub.form_id,
                 status="queued" if sub.ok else "unparsable",
             )
+            if fresh and self.cfg.uid_prefix:
+                # On arrival, so the reference exists even for a submission
+                # that never scores. The two applicants stranded on launch day
+                # still need something a steward can call them by.
+                self._intake_store.assign_uid(sub.submission_id, self.cfg.uid_prefix)
             if fresh and not sub.contact.is_empty():
                 self._intake_store.record_contact(sub.submission_id, sub.contact)
             if fresh and not sub.ok:
@@ -292,6 +301,30 @@ class IntakeService:
 
 
 def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[str, bytes]]):
+    # The stewards' spreadsheet lives inside the Prezenti workspace and cannot
+    # be shared outward, so the scores travel to it instead: a tab running
+    # =IMPORTDATA(<this url>) pulls them on Google's schedule. IMPORTDATA
+    # fetches anonymously, so the token in the path is the only thing between
+    # this and the open web -- unset, the route does not exist at all.
+    feed_token = os.environ.get("SCORES_FEED_TOKEN", "").strip()
+    feed_path = f"/scores/{feed_token}.csv" if feed_token else None
+
+    # The applicant board, same trick for a different reason. Published as an
+    # artefact it is a photograph: correct the moment it is taken and wrong by
+    # the next morning, because nothing on a schedule can republish it. Served
+    # here it is a window -- cron rewrites the file every fifteen minutes and
+    # the URL never changes. Contacts are deliberately absent from the served
+    # copy; they are in the Tally tab of the stewards' own sheet, which does
+    # not need a second home on a URL that anyone holding it can open.
+    # The scout's own leads, beside the applicants'. Same access model; a
+    # separate token so that revoking one does not take the other down with it.
+    scout_token = os.environ.get("SCOUT_FEED_TOKEN", "").strip()
+    scout_path = f"/scouted/{scout_token}.csv" if scout_token else None
+
+    board_token = os.environ.get("BOARD_TOKEN", "").strip()
+    board_path = f"/board/{board_token}.html" if board_token else None
+    board_file = os.environ.get("BOARD_HTML", "").strip()
+
     class Handler(BaseHTTPRequestHandler):
         server_version = "talent-engine"
         sys_version = ""
@@ -299,14 +332,22 @@ def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[st
         def log_message(self, fmt: str, *args: Any) -> None:  # route through logging
             log.info("%s %s", self.address_string(), fmt % args)
 
-        def _send(self, code: int, content_type: str, payload: bytes) -> None:
+        def _send(self, code: int, content_type: str, payload: bytes,
+                  no_store: bool = False, csp: str | None = None) -> None:
             self.send_response(code)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(payload)))
+            if no_store:
+                # Cloudflare caches by extension, and it cached a .csv 404 for
+                # four hours the first time this route was requested. A feed a
+                # spreadsheet pulls has to answer with today's scores, not a
+                # copy from lunchtime, so it opts out at the edge explicitly.
+                self.send_header("Cache-Control", "no-store, max-age=0")
             # The page embeds Tally in an iframe and loads nothing else, so the
             # policy can be this tight: no scripts of our own, no other origins.
             self.send_header(
                 "Content-Security-Policy",
+                csp or
                 # data: for the embedded brand fonts, which are inlined
                 # rather than fetched so the page makes no external request.
                 "default-src 'none'; style-src 'unsafe-inline'; font-src data:; "
@@ -331,6 +372,46 @@ def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[st
             path = self.path.split("?", 1)[0]
             if path.rstrip("/") in ("/healthz", "/health"):
                 self._plain(200, "ok\n")
+                return
+            if feed_path and hmac.compare_digest(path, feed_path):
+                try:
+                    body = scores_feed.csv_for(service.db_path).encode()
+                except sqlite3.Error:
+                    log.exception("scores feed could not read the database")
+                    self._plain(503, "scores unavailable\n")
+                    return
+                self._send(200, "text/csv; charset=utf-8", body, no_store=True)
+                return
+            if scout_path and hmac.compare_digest(path, scout_path):
+                try:
+                    body = scouted_feed.csv_for(service.db_path, service.cfg.key).encode()
+                except sqlite3.Error:
+                    log.exception("scout feed could not read the database")
+                    self._plain(503, "leads unavailable\n")
+                    return
+                self._send(200, "text/csv; charset=utf-8", body, no_store=True)
+                return
+            if board_path and board_file and hmac.compare_digest(path, board_path):
+                try:
+                    with open(board_file, "rb") as fh:
+                        body = fh.read()
+                except OSError:
+                    # The file is written by cron, not by this process, so a
+                    # missing one means the rebuild failed -- say so rather
+                    # than serving a stale copy or an empty page.
+                    log.exception("board file could not be read: %s", board_file)
+                    self._plain(503, "board unavailable\n")
+                    return
+                self._send(
+                    200, "text/html; charset=utf-8", body, no_store=True,
+                    # The board is the one page here that reaches outside for
+                    # anything: the brand typefaces come from Google Fonts.
+                    csp=("default-src 'none'; "
+                         "style-src 'unsafe-inline' https://fonts.googleapis.com; "
+                         "font-src https://fonts.gstatic.com; img-src data:; "
+                         "base-uri 'none'; frame-ancestors 'none'; "
+                         "form-action 'none'"),
+                )
                 return
             page = pages.get(path) or (pages.get(path.rstrip("/")) if path != "/" else None)
             if page:

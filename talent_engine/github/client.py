@@ -182,6 +182,14 @@ class GitHubClient:
                     return cached
                 if exc.code == 404:
                     return None
+                if exc.code == 409:
+                    # "Git Repository is empty." An applicant who created a repo
+                    # and has not pushed to it yet is not an error -- the repo
+                    # genuinely has no commits, and no data is the honest answer.
+                    # Raising here failed the ENTIRE application: on launch day
+                    # two of five applicants sat stuck in `queued` because one
+                    # empty repo each aborted their whole score.
+                    return None
                 if exc.code in (403, 429) and self._is_rate_limited(exc.headers):
                     if not self._wait_for_reset(exc.headers):
                         raise BudgetExhausted("rate limited with no reset window")

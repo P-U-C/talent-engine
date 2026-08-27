@@ -1,0 +1,40 @@
+[Unit]
+Description=talent-engine form intake (signed Tally webhooks -> scored submissions)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/talent-engine
+# Only the credentials this process needs. Control-plane tokens (Cloudflare,
+# Tally management API) live in operator.env and are never loaded here: a
+# public webhook parser taking untrusted input should not be able to leak them.
+EnvironmentFile=/home/ubuntu/talent-engine-runtime/intake.env
+ExecStart=/usr/bin/python3 -m talent_engine.cli \
+    --db /home/ubuntu/talent-engine-runtime/talent_engine.db \
+    --cache /home/ubuntu/talent-engine-runtime/github-cache.sqlite \
+    serve --program prezenti-sponsorship-trial --host 127.0.0.1 --port 8787
+Restart=always
+RestartSec=10
+
+# Confinement. This parses untrusted input from the public internet, so the
+# reachable filesystem is narrowed to what it actually writes.
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/talent-engine-runtime
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

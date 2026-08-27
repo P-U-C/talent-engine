@@ -111,5 +111,6 @@
     "lede": "Prezenti backs builders on evidence of what they have actually shipped \u2014 not on where they studied, who they know, or how many stars a repository has.",
     "footer": "Run by Prezenti. Grants and sponsorships for the Celo community.",
     "repo_url": "https://github.com/prezenti/talent-engine"
-  }
+  },
+  "uid_prefix": "PRE-S3-S-"
 }
