@@ -136,6 +136,7 @@ class Collector:
         self.repo_sample = repo_sample
         self.now = now or datetime.now(timezone.utc)
         self._noreply_emails: list[str] = []
+        self._noreply_canonical: str = ""
         self._email_fallback_hits: list[str] = []
 
     @property
@@ -143,6 +144,18 @@ class Collector:
         return self.now - timedelta(days=self.window_days)
 
     def collect(self, handle: str, application: Application | None = None) -> ProfileSnapshot:
+        # Per-applicant state, reset per collection rather than per instance.
+        # `cmd_score`, `cmd_monitor` and `tools/daily_scout.py` each build one
+        # Collector and run every handle through it, so an instance-lifetime
+        # `_email_fallback_hits` stayed truthy after the first applicant who
+        # needed the fallback -- and every applicant scored afterwards was told
+        # to change a git config that had never been the problem. The addresses
+        # leak the same way: `_collect_user` returns early for a handle it
+        # cannot see, which would otherwise leave the previous applicant's
+        # emails live for the next one's commit matching.
+        self._noreply_emails = []
+        self._noreply_canonical = ""
+        self._email_fallback_hits = []
         since = self.window_start
         snap = ProfileSnapshot(
             handle=handle,
@@ -169,14 +182,14 @@ class Collector:
             + [iso_week(pr.merged_at) for pr in snap.merged_prs]
             + [iso_week(rv.submitted_at) for rv in snap.reviews]
         )
-        if self._email_fallback_hits:
+        if self._email_fallback_hits and self._noreply_canonical:
             # Tell the applicant how to stop needing the fallback -- a score
             # that silently depended on git config hygiene is a bad score.
             snap.collection_notes.append(
                 "attribution note: some commits were only matchable by email, "
                 "not by GitHub login. Your local `git config user.email` is "
                 "likely the legacy unprefixed noreply form; setting it to "
-                f"'{self._noreply_emails[0]}' makes every commit directly "
+                f"'{self._noreply_canonical}' makes every commit directly "
                 "linkable to your account"
             )
         snap.collection_notes.append(
@@ -195,6 +208,11 @@ class Collector:
             return
         snap.account_created_at = user.get("created_at")
         self._noreply_emails = noreply_email_variants(snap.handle, user.get("id"))
+        # Only the id-prefixed form is the one GitHub links today, so it is the
+        # only one worth telling anyone to set. Without an account id there is
+        # no advice to give -- the legacy form is the problem, not the fix.
+        if user.get("id") is not None:
+            self._noreply_canonical = self._noreply_emails[0]
 
     def _collect_repos(self, snap: ProfileSnapshot, since: datetime) -> None:
         repos: list[RepoActivity] = []
@@ -269,7 +287,16 @@ class Collector:
         created = _parse(repo.created_at)
 
         def consume(raw: dict[str, Any]) -> bool:
-            """Fold one raw commit. Returns False when skipped as backdated."""
+            """Fold one raw commit. Returns False when skipped as backdated.
+
+            The caller counts the commit either way. `commits_in_window` is
+            every commit attributed to the applicant and `backdated_commits` is
+            a subset of it, which is the arithmetic
+            `scoring.flags._counted_commits` performs: `commits_in_window -
+            backdated_commits`. Excluding backdated commits here as well made
+            that subtraction remove them twice -- four commits with two
+            backdated counted as zero genuine ones.
+            """
             date = (
                 ((raw.get("commit") or {}).get("author") or {}).get("date")
                 or ((raw.get("commit") or {}).get("committer") or {}).get("date")
@@ -287,9 +314,8 @@ class Collector:
             {"author": snap.handle, "since": since.isoformat()},
             max_pages=MAX_COMMIT_PAGES,
         ):
-            if consume(raw):
-                count += 1
-            else:
+            count += 1
+            if not consume(raw):
                 backdated += 1
 
         if count == 0 and self._noreply_emails:
@@ -299,6 +325,17 @@ class Collector:
             # take one bounded unfiltered page and match the server-generated
             # addresses ourselves. Same spoofing surface as GitHub's own
             # email-based linkage; the bound keeps the budget honest.
+            #
+            # `count` here is every row the filter returned, backdated ones
+            # included, so zero means the filter genuinely linked nothing. Were
+            # it the surviving count instead, a repo whose linked commits were
+            # all backdated would rescan and count the same commits as
+            # backdated a second time.
+            #
+            # Not covered: partial linkage. Someone who changed their git email
+            # midway keeps `count > 0`, so the fallback never runs and the
+            # remainder stays invisible. Deliberate -- an unconditional second
+            # page for every repo is a different budget.
             matched = 0
             for raw in self.client.paginate(
                 f"/repos/{repo.name}/commits",
@@ -311,10 +348,9 @@ class Collector:
                 handle_login = ((raw.get("author") or {}) or {}).get("login") or ""
                 if email not in self._noreply_emails and handle_login.lower() != snap.handle.lower():
                     continue
-                if consume(raw):
-                    count += 1
-                    matched += 1
-                else:
+                count += 1
+                matched += 1
+                if not consume(raw):
                     backdated += 1
             if matched:
                 snap.collection_notes.append(

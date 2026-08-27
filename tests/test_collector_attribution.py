@@ -155,3 +155,126 @@ def test_fallback_matches_only_server_generated_addresses():
     snap = collector.collect(HANDLE)
 
     assert snap.repos[0].commits_in_window == 1
+
+
+# --------------------------------------------------------------------------
+# Regressions from review. Each of these passed on `main` and failed on the
+# first cut of the fallback, and none of them involve the fallback firing
+# correctly -- they are the collateral of the code around it.
+# --------------------------------------------------------------------------
+
+
+def test_backdated_commits_stay_a_subset_of_the_window_count():
+    """`commits_in_window` counts every attributed commit, backdated included.
+
+    `scoring.flags._counted_commits` is `commits_in_window - backdated_commits`.
+    Excluding backdated commits from the count as well subtracts them twice:
+    four commits with two backdated read as zero genuine ones, which deflates
+    the shipping dimension and lowers the integrity-flag threshold for anyone
+    who committed locally before creating the repository.
+    """
+    pages = {
+        **user_page(),
+        **repo_page("2026-08-01T00:00:00Z"),
+        "/repos/builder/releases": [],
+        "/search/issues": [],
+    }
+    # The repo was created 2026-01-01 (see repo_page); two of these predate it.
+    pages[("/repos/builder/app/commits", frozenset({"author": HANDLE, "since": SINCE}.items()))] = [
+        commit(VARIANT, HANDLE, "2026-08-10T10:00:00Z"),
+        commit(VARIANT, HANDLE, "2026-08-03T10:00:00Z"),
+        commit(VARIANT, HANDLE, "2025-11-01T10:00:00Z"),
+        commit(VARIANT, HANDLE, "2025-11-02T10:00:00Z"),
+    ]
+
+    collector = Collector(FakeClient(pages), now=NOW)
+    snap = collector.collect(HANDLE)
+    repo = snap.repos[0]
+
+    assert repo.commits_in_window == 4
+    assert repo.backdated_commits == 2
+    assert repo.commits_in_window - repo.backdated_commits == 2
+
+
+def test_all_backdated_does_not_trigger_a_rescan():
+    """The fallback gate reads the filter's row count, not the survivors.
+
+    Every linked commit being backdated leaves zero *genuine* commits, but the
+    filter linked them fine. Gating on the surviving count would rescan the
+    same repo unfiltered and count the same commits as backdated a second time.
+    """
+    pages = {
+        **user_page(),
+        **repo_page("2026-08-01T00:00:00Z"),
+        "/repos/builder/releases": [],
+        "/search/issues": [],
+    }
+    pages[("/repos/builder/app/commits", frozenset({"author": HANDLE, "since": SINCE}.items()))] = [
+        commit(VARIANT, HANDLE, "2025-11-01T10:00:00Z"),
+        commit(VARIANT, HANDLE, "2025-11-02T10:00:00Z"),
+    ]
+
+    collector = Collector(FakeClient(pages), now=NOW)
+    snap = collector.collect(HANDLE)
+
+    assert snap.repos[0].backdated_commits == 2  # counted once, not twice
+    unfiltered = [c for c in collector.client.calls
+                  if c[0].endswith("/commits") and "author" not in c[1]]
+    assert unfiltered == []
+
+
+def test_fallback_state_does_not_leak_between_applicants():
+    """One Collector scores many people, so the state must be per collection.
+
+    `cmd_score`, `cmd_monitor` and `tools/daily_scout.py` each build a single
+    Collector and loop every handle through it. Instance-lifetime state made
+    the first fallback hit stick, and every applicant scored afterwards was
+    told to change a git config that had never been their problem.
+    """
+    other, other_id = "second", 999
+    pages = {
+        **user_page(),
+        **repo_page("2026-08-01T00:00:00Z"),
+        f"/users/{other}": {"login": other, "id": other_id,
+                            "created_at": "2019-01-01T00:00:00Z"},
+        f"/users/{other}/repos": [],
+        "/repos/builder/releases": [],
+        "/search/issues": [],
+    }
+    pages[("/repos/builder/app/commits", frozenset({"author": HANDLE, "since": SINCE}.items()))] = []
+    pages[("/repos/builder/app/commits", frozenset({"since": SINCE}.items()))] = [
+        commit(VARIANT, None, "2026-08-10T10:00:00Z"),
+    ]
+
+    collector = Collector(FakeClient(pages), now=NOW)
+    first = collector.collect(HANDLE)
+    second = collector.collect(other)
+
+    assert any("attribution note" in n for n in first.collection_notes)
+    assert not any("attribution note" in n for n in second.collection_notes)
+
+
+def test_no_advisory_when_the_account_id_is_unknown():
+    """Without an id there is no linkable address to recommend.
+
+    The prefixed form is the one GitHub links; the bare form is the problem.
+    Naming the bare form as the fix is advice that cannot work.
+    """
+    pages = {
+        **user_page(),
+        **repo_page("2026-08-01T00:00:00Z"),
+        "/repos/builder/releases": [],
+        "/search/issues": [],
+    }
+    pages[f"/users/{HANDLE}"] = {"login": HANDLE, "created_at": "2018-01-01T00:00:00Z"}
+    pages[("/repos/builder/app/commits", frozenset({"author": HANDLE, "since": SINCE}.items()))] = []
+    pages[("/repos/builder/app/commits", frozenset({"since": SINCE}.items()))] = [
+        commit(f"{HANDLE}@users.noreply.github.com", None, "2026-08-10T10:00:00Z"),
+    ]
+
+    collector = Collector(FakeClient(pages), now=NOW)
+    snap = collector.collect(HANDLE)
+
+    assert snap.repos[0].commits_in_window == 1  # still recovered
+    assert any("noreply email fallback" in n for n in snap.collection_notes)
+    assert not any("attribution note" in n for n in snap.collection_notes)
