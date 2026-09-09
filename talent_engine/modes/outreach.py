@@ -162,6 +162,14 @@ OPENINGS = [
     "Hi {name}, I went looking for people building agent infrastructure and ended up at {repo}.",
 ]
 
+# Who is writing. A cold DM that opens with what the sender found and then goes
+# straight to money reads as a bot until somebody signs it, and the account name
+# in the header is not a signature -- the recipient sees a handle, not a person.
+# This is one fixed line rather than a rotated set: varying the openings stops
+# 300 messages looking like one message, but varying who you claim to be is a
+# different thing entirely.
+IDENTITY = "zoz here from @prezenti_grants."
+
 # Two bodies rather than one, for the same reason as the openings: the body is
 # the longest part and therefore the part that gives a template away when two
 # recipients compare messages.
@@ -185,6 +193,7 @@ CLOSINGS = [
 # landing page: the catch is stated first because burying it is the thing that
 # would actually cost trust.
 FULL_MESSAGE = """{opening}
+{identity}
 
 We're funding 5 people for 4 months, about $1,400 each in tooling: Claude Max 20x, ChatGPT Pro, and $200 to spend on whatever else. It's a trial, so it's small on purpose.
 
@@ -197,6 +206,7 @@ Everything is public, including the rubric you'd be scored against and the code 
 sponsorships.prezenti.xyz"""
 
 SHORT_MESSAGE = """{opening}
+{identity}
 
 {body}
 
@@ -241,6 +251,7 @@ def render(template: str, *, handle: str, name: str, hook: str = "",
     opening = OPENINGS[variant(handle, len(OPENINGS))].format(name=who, repo=subject)
     return template.format(
         opening=opening,
+        identity=IDENTITY,
         body=BODIES[variant(handle + "b", len(BODIES))],
         closing=CLOSINGS[variant(handle[::-1], len(CLOSINGS))],
         name=who,
