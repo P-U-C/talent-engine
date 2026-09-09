@@ -31,6 +31,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import unquote_plus
 from typing import Any
 
 from ..config import ProgramConfig
@@ -42,7 +43,7 @@ from ..notify import application_scored
 from ..scoring.concerns import concerns
 from ..scoring.engine import CODE_VERSION, score_snapshot
 from ..store.db import Store
-from . import outreach_feed, scores_feed, scouted_feed, send_console
+from . import outreach_feed, scores_feed, scouted_feed, send_console, steward_reviews
 
 log = logging.getLogger("talent_engine.intake")
 
@@ -344,6 +345,26 @@ def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[st
     # nothing when the two pages differ only in presentation.
     reader_path = f"/read/{board_token}.html" if board_token else None
     reader_file = os.environ.get("READER_HTML", "").strip()
+    # Two stewards read the same queue and record a call each. The names come
+    # from the environment rather than the code, so the roster is a deployment
+    # fact and not a commit in a public repository.
+    stewards = tuple(
+        n.strip().lower()
+        for n in os.environ.get("READER_STEWARDS", "").split(",")
+        if n.strip()
+    )
+    verdict_path = f"/read/{board_token}/verdict" if board_token else None
+    state_path = f"/read/{board_token}/state" if board_token else None
+
+    def steward_of(query: str) -> str:
+        """The `as=` parameter, honoured only when it names a known steward, so
+        a typo cannot quietly open a third private column nobody ever reads."""
+        for part in query.split("&"):
+            key, _, value = part.partition("=")
+            if key == "as":
+                name = unquote_plus(value).strip().lower()
+                return name if name in stewards else ""
+        return ""
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "talent-engine"
@@ -465,6 +486,21 @@ def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[st
                          "form-action 'none'"),
                 )
                 return
+            if state_path and hmac.compare_digest(path, state_path):
+                who = steward_of(self.path.partition("?")[2])
+                if not who:
+                    self._plain(400, "unknown steward\n")
+                    return
+                try:
+                    body = json.dumps(
+                        steward_reviews.state(service.db_path, who)
+                    ).encode()
+                except sqlite3.Error:
+                    log.exception("could not read steward verdicts")
+                    self._plain(503, "verdicts unavailable\n")
+                    return
+                self._send(200, "application/json", body, no_store=True)
+                return
             if reader_path and reader_file and hmac.compare_digest(path, reader_path):
                 try:
                     with open(reader_file, "rb") as fh:
@@ -481,7 +517,7 @@ def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[st
                     # and talks to nothing.
                     csp=("default-src 'none'; "
                          "style-src 'unsafe-inline' https://fonts.googleapis.com; "
-                         "script-src 'unsafe-inline'; "
+                         "script-src 'unsafe-inline'; connect-src 'self'; "
                          "font-src https://fonts.gstatic.com; img-src data:; "
                          "base-uri 'none'; frame-ancestors 'none'; "
                          "form-action 'none'"),
@@ -501,6 +537,11 @@ def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[st
                 self.path.split("?", 1)[0].rstrip("/"), send_mark_path
             ):
                 self._mark_sent()
+                return
+            if verdict_path and hmac.compare_digest(
+                self.path.split("?", 1)[0].rstrip("/"), verdict_path
+            ):
+                self._record_verdict(steward_of(self.path.partition("?")[2]))
                 return
             if self.path.rstrip("/") not in ("/webhook/tally", "/webhook"):
                 self._plain(404)
@@ -539,6 +580,49 @@ def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[st
 
             disposition = service.accept(sub)
             self._plain(202, disposition + "\n")
+
+        def _record_verdict(self, who: str) -> None:
+            """One steward's call on one applicant. Same authorisation model as
+            every other route here -- the token in the path. The steward name is
+            attribution, not authentication, and steward_reviews says so."""
+            if not who:
+                self._plain(400, "unknown steward\n")
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                self._plain(400)
+                return
+            if length <= 0 or length > 4096:
+                self._plain(400)
+                return
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+                handle = str(body.get("handle", "")).strip()
+                verdict = str(body.get("verdict", "")).strip().lower()
+            except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+                self._plain(400)
+                return
+            if not handle or len(handle) > 40:
+                self._plain(400)
+                return
+            if verdict and verdict not in steward_reviews.VERDICTS:
+                self._plain(400)
+                return
+            try:
+                steward_reviews.record(
+                    service.db_path, who, handle, verdict, utc_now_iso()
+                )
+            except sqlite3.Error:
+                log.exception("could not record %s's verdict on %s", who, handle)
+                self._plain(503)
+                return
+            try:
+                payload = steward_reviews.state(service.db_path, who)
+            except sqlite3.Error:
+                payload = {"viewer": who}
+            self._send(200, "application/json", json.dumps(payload).encode(),
+                       no_store=True)
 
         def _mark_sent(self) -> None:
             """Record that a human sent a message. The token in the path is the

@@ -135,6 +135,8 @@ def card(index: int, total: int, sub: dict) -> str:
 
   {concerns_html}
 
+  <p class="second" data-second="{e(sub.get('handle'))}" hidden></p>
+
   <details class="block">
     <summary>The score, and where it came from</summary>
     {render_score(score) if score else '<p class="sub">Not scored.</p>'}
@@ -244,6 +246,11 @@ def render(data: dict) -> str:
   [hidden] {{ display:none !important; }}
 
   /* The tally is the reason to have kept verdicts at all. */
+  /* The other steward's call, revealed only once you have made your own. */
+  .second {{ margin-top:1.5rem; padding:.6rem .9rem; border-left:3px solid var(--accent);
+             background:var(--goodbg); font-size:.9rem; border-radius:.25rem; }}
+  .second.split {{ border-left-color:var(--warn); background:var(--warnbg); }}
+  .agree {{ font-weight:600; }}
   #tally {{ margin-top:2rem; }}
   #tally table {{ border-collapse:collapse; width:100%; font-size:.9rem; }}
   #tally td, #tally th {{ text-align:left; padding:.35rem .6rem .35rem 0;
@@ -269,7 +276,8 @@ def render(data: dict) -> str:
     </span>
     <button id="showtally" type="button">tally</button>
   </div>
-  <p class="hint">← → or j / k to move · 1 yes · 2 maybe · 3 no · verdicts stay in this browser only</p>
+  <p class="hint">← → or j / k to move · 1 yes · 2 maybe · 3 no ·
+    <span id="whoami">reading anonymously — verdicts stay in this browser</span></p>
 </div>
 <main id="main">
 {cards}
@@ -278,45 +286,127 @@ def render(data: dict) -> str:
 <script>
 (function () {{
   "use strict";
+  // Two stewards, one queue. A verdict is written to the server under the name
+  // in `?as=`, and the OTHER steward's call on an applicant stays hidden until
+  // you have recorded your own -- two correlated reads are worth much less than
+  // two independent ones, and the cheapest way to correlate them is to let the
+  // second reader see the first reader's answer.
   var handles = {handles};
   var cards = Array.prototype.slice.call(document.querySelectorAll(".card"));
   var at = 0, KEY = "prezenti-reader-verdicts";
-  var store = {{}};
-  try {{ store = JSON.parse(localStorage.getItem(KEY) || "{{}}"); }} catch (err) {{ store = {{}}; }}
+  var base = location.pathname.replace(/\.html$/, "");
+  var who = (new URLSearchParams(location.search).get("as") || "").trim().toLowerCase();
+  var mine = {{}}, others = {{}}, progress = {{}}, online = false;
 
-  function save() {{
-    try {{ localStorage.setItem(KEY, JSON.stringify(store)); }} catch (err) {{ /* private mode */ }}
+  function local() {{
+    try {{ return JSON.parse(localStorage.getItem(KEY) || "{{}}"); }} catch (err) {{ return {{}}; }}
   }}
+  function saveLocal() {{
+    try {{ localStorage.setItem(KEY, JSON.stringify(mine)); }} catch (err) {{ /* private mode */ }}
+  }}
+  function absorb(state) {{
+    mine = state.mine || {{}};
+    others = state.others || {{}};
+    progress = state.progress || {{}};
+    online = true;
+  }}
+  function whoami() {{
+    var el = document.getElementById("whoami");
+    if (!who) {{
+      el.textContent = "reading anonymously — verdicts stay in this browser. "
+        + "Add ?as=<your name> to record them.";
+      return;
+    }}
+    var parts = Object.keys(progress).sort().map(function (n) {{
+      return n + " " + progress[n] + "/" + handles.length;
+    }});
+    el.textContent = "signed in as " + who
+      + (parts.length ? " · read so far: " + parts.join(", ") : "")
+      + (online ? "" : " · offline, not saving");
+  }}
+
+  function post(handle, verdict) {{
+    if (!who) {{ saveLocal(); return Promise.resolve(); }}
+    return fetch(base + "/verdict?as=" + encodeURIComponent(who), {{
+      method: "POST",
+      headers: {{ "Content-Type": "application/json" }},
+      body: JSON.stringify({{ handle: handle, verdict: verdict }})
+    }}).then(function (r) {{
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    }}).then(function (state) {{
+      absorb(state); whoami(); show(at);
+    }}).catch(function () {{
+      online = false; whoami();
+    }});
+  }}
+
   function show(i) {{
     if (i < 0) i = 0;
     if (i > cards.length - 1) i = cards.length - 1;
     cards.forEach(function (c, n) {{ c.hidden = n !== i; }});
     at = i;
+    var handle = handles[i];
     document.getElementById("count").textContent = (i + 1) + " / " + cards.length;
     document.getElementById("fill").style.width = ((i + 1) / cards.length * 100) + "%";
-    var mine = store[handles[i]] || "";
+    var call = mine[handle] || "";
     document.querySelectorAll("[data-v]").forEach(function (b) {{
-      b.setAttribute("aria-pressed", b.dataset.v === mine ? "true" : "false");
+      b.setAttribute("aria-pressed", b.dataset.v === call ? "true" : "false");
     }});
+
+    var slot = cards[i].querySelector(".second");
+    var theirs = others[handle];
+    if (slot) {{
+      var names = theirs ? Object.keys(theirs) : [];
+      if (!call || !names.length) {{
+        slot.hidden = true;
+        slot.className = "second";
+      }} else {{
+        var split = names.some(function (n) {{ return theirs[n] !== call; }});
+        slot.className = "second" + (split ? " split" : "");
+        slot.innerHTML = names.map(function (n) {{
+          return "<span class=agree>" + n + "</span> said <strong>" + theirs[n] + "</strong>";
+        }}).join(" · ") + (split ? " — you disagree, which is the useful case." : " — you agree.");
+        slot.hidden = false;
+      }}
+    }}
     document.getElementById("tally").hidden = true;
     window.scrollTo({{ top: 0, behavior: "instant" }});
-    try {{ location.hash = handles[i]; }} catch (err) {{ /* ignore */ }}
+    try {{ history.replaceState(null, "", location.pathname + location.search + "#" + handle); }}
+    catch (err) {{ /* ignore */ }}
   }}
+
   function verdict(v) {{
-    if (store[handles[at]] === v) delete store[handles[at]]; else store[handles[at]] = v;
-    save();
+    var handle = handles[at];
+    if (mine[handle] === v) {{ delete mine[handle]; v = ""; }} else {{ mine[handle] = v; }}
     show(at);
+    post(handle, v);
   }}
+
   function tally() {{
     var order = {{ yes: 0, maybe: 1, no: 2 }};
-    var marked = handles.filter(function (h) {{ return store[h]; }});
-    marked.sort(function (a, b) {{ return order[store[a]] - order[store[b]]; }});
+    var marked = handles.filter(function (h) {{ return mine[h]; }});
+    marked.sort(function (a, b) {{ return order[mine[a]] - order[mine[b]]; }});
+    var split = marked.filter(function (h) {{
+      var t = others[h] || {{}};
+      return Object.keys(t).some(function (n) {{ return t[n] !== mine[h]; }});
+    }});
     var body = document.getElementById("tallybody");
-    if (!marked.length) {{ body.innerHTML = "<p>Nothing marked yet.</p>"; }}
-    else {{
-      body.innerHTML = "<table><tr><th>handle</th><th>call</th></tr>" + marked.map(function (h) {{
-        return "<tr><td>" + h + "</td><td>" + store[h] + "</td></tr>";
-      }}).join("") + "</table><p>" + marked.length + " of " + handles.length + " marked.</p>";
+    if (!marked.length) {{
+      body.innerHTML = "<p>Nothing marked yet.</p>";
+    }} else {{
+      body.innerHTML =
+        (split.length
+          ? "<p><strong>" + split.length + " disagreement" + (split.length === 1 ? "" : "s")
+            + "</strong> — these are the ones worth a conversation: " + split.join(", ") + ".</p>"
+          : "<p>No disagreements so far.</p>")
+        + "<table><tr><th>applicant</th><th>you</th><th>other stewards</th></tr>"
+        + marked.map(function (h) {{
+            var t = others[h] || {{}};
+            var them = Object.keys(t).map(function (n) {{ return n + ": " + t[n]; }}).join(", ");
+            return "<tr><td>" + h + "</td><td>" + mine[h] + "</td><td>" + (them || "—") + "</td></tr>";
+          }}).join("")
+        + "</table><p>" + marked.length + " of " + handles.length + " read.</p>";
     }}
     cards.forEach(function (c) {{ c.hidden = true; }});
     document.getElementById("tally").hidden = false;
@@ -340,7 +430,27 @@ def render(data: dict) -> str:
   }});
 
   var start = handles.indexOf((location.hash || "").replace("#", ""));
-  show(start > -1 ? start : 0);
+  var first = start > -1 ? start : 0;
+
+  if (!who) {{
+    mine = local();
+    whoami(); show(first);
+  }} else {{
+    fetch(base + "/state?as=" + encodeURIComponent(who))
+      .then(function (r) {{ if (!r.ok) throw new Error(r.status); return r.json(); }})
+      .then(function (state) {{
+        absorb(state);
+        // Anything marked before there was a server to send it to still counts.
+        var stray = local(), pending = Object.keys(stray).filter(function (h) {{
+          return !mine[h] && handles.indexOf(h) > -1;
+        }});
+        return pending.reduce(function (chain, h) {{
+          return chain.then(function () {{ mine[h] = stray[h]; return post(h, stray[h]); }});
+        }}, Promise.resolve());
+      }})
+      .catch(function () {{ mine = local(); online = false; }})
+      .then(function () {{ whoami(); show(first); }});
+  }}
 }}());
 </script>
 </body>

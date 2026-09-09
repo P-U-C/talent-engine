@@ -297,6 +297,19 @@ CREATE TABLE IF NOT EXISTS x_delivery (
     dm_detail TEXT DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS steward_reviews (
+    -- Two stewards read the same queue and must reach their own view of it
+    -- before seeing each other's. One row per (steward, applicant); the primary
+    -- key makes a re-read an update rather than a second opinion from the same
+    -- person. `recorded_at` is what tells you a verdict was reconsidered.
+    steward     TEXT NOT NULL,
+    handle      TEXT NOT NULL,
+    verdict     TEXT NOT NULL,           -- yes | maybe | no
+    note        TEXT NOT NULL DEFAULT '',
+    recorded_at TEXT NOT NULL,
+    PRIMARY KEY (steward, handle)
+);
+
 CREATE TABLE IF NOT EXISTS contacts (
     submission_id TEXT PRIMARY KEY,
     email TEXT DEFAULT '',
