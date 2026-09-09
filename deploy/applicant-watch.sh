@@ -44,6 +44,12 @@ cp -f "$HOME/talent-engine-runtime/board.html" \
       "$HOME/ops-state/public/applicants.html" 2>/dev/null || true
 python3 "$HOME/talent-engine/tools/board_to_artifact.py" >/dev/null 2>&1 || true
 
+# The reader: same applicants, one at a time, for the human step that has never
+# actually run. Regenerated on the same 15-minute beat as the board so the page
+# Chad is part-way through is never behind the queue.
+python3 "$HOME/talent-engine/tools/reader_report.py" \
+  --out "$HOME/talent-engine-runtime/reader.html" >/dev/null 2>&1 || true
+
 stuck=$(sqlite3 "$DB" "
   select count(*) from submissions
   where status <> 'scored'

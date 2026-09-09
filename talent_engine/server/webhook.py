@@ -336,6 +336,15 @@ def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[st
     board_path = f"/board/{board_token}.html" if board_token else None
     board_file = os.environ.get("BOARD_HTML", "").strip()
 
+    # The reader: the same applicants, one at a time, in the order a person can
+    # judge them. The board answers "what is in the pipeline"; it is useless for
+    # the thing that actually has to happen, which is reading thirty-two
+    # applications and forming a view. Deliberately the SAME token as the board
+    # -- identical data, identical audience, and a second secret to rotate buys
+    # nothing when the two pages differ only in presentation.
+    reader_path = f"/read/{board_token}.html" if board_token else None
+    reader_file = os.environ.get("READER_HTML", "").strip()
+
     class Handler(BaseHTTPRequestHandler):
         server_version = "talent-engine"
         sys_version = ""
@@ -451,6 +460,28 @@ def build_handler(service: IntakeService, secret: str, pages: dict[str, tuple[st
                     # anything: the brand typefaces come from Google Fonts.
                     csp=("default-src 'none'; "
                          "style-src 'unsafe-inline' https://fonts.googleapis.com; "
+                         "font-src https://fonts.gstatic.com; img-src data:; "
+                         "base-uri 'none'; frame-ancestors 'none'; "
+                         "form-action 'none'"),
+                )
+                return
+            if reader_path and reader_file and hmac.compare_digest(path, reader_path):
+                try:
+                    with open(reader_file, "rb") as fh:
+                        body = fh.read()
+                except OSError:
+                    log.exception("reader file could not be read: %s", reader_file)
+                    self._plain(503, "reader unavailable\n")
+                    return
+                self._send(
+                    200, "text/html; charset=utf-8", body, no_store=True,
+                    # Same as the board plus inline script: paging between
+                    # applicants and remembering a verdict happen in the
+                    # reader's own browser, so the page carries its own logic
+                    # and talks to nothing.
+                    csp=("default-src 'none'; "
+                         "style-src 'unsafe-inline' https://fonts.googleapis.com; "
+                         "script-src 'unsafe-inline'; "
                          "font-src https://fonts.gstatic.com; img-src data:; "
                          "base-uri 'none'; frame-ancestors 'none'; "
                          "form-action 'none'"),
