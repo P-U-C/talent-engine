@@ -322,3 +322,29 @@ def test_a_closed_programme_does_not_show_an_application_form():
     page = landing_page("P", "formid", None, overlay).decode()
     assert "Applications are closed" in page
     assert "tally.so/embed" not in page
+
+
+def test_the_deployment_close_flag_hides_the_form_without_changing_policy(monkeypatch):
+    """Closing intake is operational state, not a new terms release."""
+    from talent_engine.programs import load_overlay
+    from talent_engine.server import landing_page
+
+    overlay = load_overlay("prezenti-sponsorship-trial")
+    before = overlay.terms_digest()
+    monkeypatch.setenv("TE_APPLICATIONS_CLOSE_AT", "2026-09-24 00:00 America/Los_Angeles")
+
+    open_page = landing_page("P", "formid", None, overlay).decode()
+
+    assert overlay.terms_digest() == before
+    assert "2026-09-24 00:00 America/Los_Angeles" in open_page
+    assert "tally.so/embed" in open_page
+
+    monkeypatch.setenv("TE_APPLICATIONS_CLOSED", "1")
+    monkeypatch.setenv("TE_APPLICATIONS_CLOSED_AT", "2026-09-24 00:00 America/Los_Angeles")
+
+    page = landing_page("P", "formid", None, overlay).decode()
+
+    assert overlay.terms_digest() == before
+    assert "Applications are closed" in page
+    assert "2026-09-24 00:00 America/Los_Angeles" in page
+    assert "tally.so/embed" not in page

@@ -294,6 +294,15 @@ def _status_block(overlay, form_id: str) -> str:
     A page that renders an application form is a page that says "apply". If the
     programme is not taking applications, it must not look like it is.
     """
+    if _env_applications_closed():
+        closed_at = html.escape(os.environ.get("TE_APPLICATIONS_CLOSED_AT", "").strip())
+        suffix = f" This round closed at {closed_at}." if closed_at else ""
+        return (
+            '<div class="card accent"><h3>Applications are closed</h3>'
+            f"<p>This round is not accepting new applications.{suffix} The "
+            "rubric and the code remain public, and you can still reproduce "
+            "your own score.</p></div>"
+        )
     if overlay is not None and not overlay.is_open:
         return (
             '<div class="card accent"><h3>Applications are closed</h3>'
@@ -302,14 +311,29 @@ def _status_block(overlay, form_id: str) -> str:
             "</div>"
         )
     closing = ""
-    if overlay is not None and overlay.applications_close:
+    close_label = _applications_close_label(overlay)
+    if close_label:
         closing = (
             f'<p class="note">Applications close when the fifth place is '
-            f"filled, or {html.escape(overlay.applications_close)}, whichever "
+            f"filled, or {html.escape(close_label)}, whichever "
             "comes first.</p>"
         )
     version = overlay.terms_digest() if overlay is not None else ""
     return closing + _embed(form_id, version)
+
+
+def _env_applications_closed() -> bool:
+    value = os.environ.get("TE_APPLICATIONS_CLOSED", "").strip().lower()
+    return value in {"1", "true", "yes", "closed"}
+
+
+def _applications_close_label(overlay) -> str:
+    override = os.environ.get("TE_APPLICATIONS_CLOSE_AT", "").strip()
+    if override:
+        return override
+    if overlay is not None and overlay.applications_close:
+        return str(overlay.applications_close)
+    return ""
 
 
 def landing_page(
